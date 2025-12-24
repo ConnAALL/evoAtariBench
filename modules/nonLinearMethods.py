@@ -95,14 +95,3 @@ def dropout_regularization(x: np.ndarray, rate: float, seed: int = 42) -> np.nda
 
     # Apply mask and rescale to maintain expected value
     return np.where(mask, x / keep_prob, 0.0).astype(np.float32, copy=False)
-
-NONLINEAR_METHODS = {
-    "quantization": quantization,
-    "sparsification": sparsification,
-    "dropout_regularization": dropout_regularization,
-}
-
-def get_method(name):
-    if name not in NONLINEAR_METHODS:
-        raise KeyError(f"unknown method: {name}")
-    return NONLINEAR_METHODS[name]

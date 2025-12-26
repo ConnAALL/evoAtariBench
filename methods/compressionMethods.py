@@ -15,6 +15,7 @@ import numpy as np
 from scipy.fftpack import dct as _dct
 from scipy.signal import convolve2d as _convolve2d
 
+
 def convert_to_grayscale(x):
     """Convert a given image matrix into grayscale"""
     x = np.asarray(x)
@@ -23,6 +24,7 @@ def convert_to_grayscale(x):
     if x.ndim == 3 and x.shape[-1] in (1, 3, 4):  # If it is not grayscale, convert it
         return x[..., :3].mean(axis=-1)
     raise ValueError("expected (H,W) or (H,W,C)")
+
 
 def dct_k(x, args):
     """Apply 2-D Discrete Cosine Transform to x, and crop the top-left kxk corner"""
@@ -35,6 +37,7 @@ def dct_k(x, args):
     x = convert_to_grayscale(x).astype(np.float32, copy=False)
     c = _dct(_dct(x, axis=-1, norm=norm), axis=-2, norm=norm)
     return c[:k, :k].copy()
+
 
 def dft_k(x, args):
     """Apply 2-D Discrete Fourier Transform to x, and crop the center kxk"""
@@ -58,11 +61,13 @@ def dft_k(x, args):
 
     return low_freq.astype(np.complex64, copy=False)
 
+
 def conv2d(x, kernel, mode="same", boundary="symm", fillvalue=0.0):
     """Apply 2-D Convolution to x with a given kernel"""
     x = convert_to_grayscale(x).astype(np.float32, copy=False)
     k = np.asarray(kernel, dtype=np.float32)
     return _convolve2d(x, k, mode=mode, boundary=boundary, fillvalue=fillvalue).astype(np.float32)
+
 
 def dwt_keep_scales_fwd(x, wavelet="bior4.4", levels=4, keep_levels=1, mode="symmetric"):
     """Apply 2-D Wavelet Transform to x, and keep the top k scales"""
@@ -91,8 +96,29 @@ def dwt_keep_scales_fwd(x, wavelet="bior4.4", levels=4, keep_levels=1, mode="sym
     }
     return arr.astype(np.float32, copy=False), meta
 
+
 def aed_encode(x, encoder):
     return encoder(x)
 
+
 def aed_decode(z, decoder):
     return decoder(z)
+
+
+def dwt(x, args):
+    wavelet = args.get("wavelet", "bior4.4")
+    levels = args.get("levels", 4)
+    keep_levels = args.get("keep_levels", 1)
+    mode = args.get("mode", "symmetric")
+    return dwt_keep_scales_fwd(x, wavelet=wavelet, levels=levels, keep_levels=keep_levels, mode=mode)
+
+
+def get_compression_method(name):
+    n = str(name).strip().lower()
+    if n == "dct":
+        return dct_k
+    if n == "dft":
+        return dft_k
+    if n == "dwt":
+        return dwt
+    raise ValueError(f"unknown compression method: {name}")

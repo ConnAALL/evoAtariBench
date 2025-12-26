@@ -7,7 +7,7 @@ cma==3.3.0
 cycler==0.12.1
 filelock==3.20.1
 fonttools==4.61.1
-gymnasium==0.29.1
+gymnasium[atari, accept-rom-license]==0.29.1
 idna==3.11
 jsonschema==4.25.1
 jsonschema-specifications==2025.9.1

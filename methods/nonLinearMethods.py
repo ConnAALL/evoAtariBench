@@ -9,17 +9,22 @@ Currently supported methods:
 
 import numpy as np
 
-def quantization(x: np.ndarray, num_levels: int) -> np.ndarray:
+def quantization(x: np.ndarray, args: dict) -> np.ndarray:
     """
     Function for uniform quantization. 
 
     Parameters:
         x: Input array of shape (H, W) or (H, W, C)
-        num_levels: Number of quantization levels
+        args: Dictionary containing the number of quantization levels
 
     Returns:
         Quantized array of shape (H, W) or (H, W, C)
     """
+    num_levels = args["num_levels"]
+
+    if not num_levels:
+        raise ValueError("num_levels must be provided for quantization")
+
     if int(num_levels) <= 1:  # If the number of quantization levels is less than or equal to 1, raise an error
         raise ValueError("num_levels must be greater than 1")
     
@@ -43,7 +48,7 @@ def quantization(x: np.ndarray, num_levels: int) -> np.ndarray:
     # Scale the quantized array back to the original range
     return y * scale + x_min
 
-def sparsification(x: np.ndarray, percentile: float) -> np.ndarray:
+def sparsification(x: np.ndarray, args: dict) -> np.ndarray:
     """
     Function for sparsifying the input array based on a percentile.
 
@@ -54,6 +59,11 @@ def sparsification(x: np.ndarray, percentile: float) -> np.ndarray:
     Returns:
         Sparsified array of shape (H, W) or (H, W, C)
     """
+    percentile = args["percentile"]
+
+    if not percentile:
+        raise ValueError("percentile must be provided for sparsification")
+
     # If the percentile is not in the range [0, 100], raise an error
     if not (0.0 <= percentile <= 100.0):
         raise ValueError("q must be in [0, 100]")
@@ -66,18 +76,22 @@ def sparsification(x: np.ndarray, percentile: float) -> np.ndarray:
     # Sparsify the input array based on the percentile
     return np.where(np.abs(x) >= thr, x, 0.0).astype(np.float32, copy=False)
 
-def dropout_regularization(x: np.ndarray, rate: float, seed: int = 42) -> np.ndarray:
+def dropout_regularization(x: np.ndarray, args: dict) -> np.ndarray:
     """
     Function for dropout regularization.
 
     Parameters:
         x: Input array of any shape
-        rate: Dropout probability (must be in [0, 1))
-        seed: Random seed (default = 42)
+        args: Dictionary containing the dropout probability and the random number generator
 
     Returns:
         Array with dropout regularization applied
     """
+    rate = args["rate"]
+    rng = args["rng"]
+    if not rate or not rng:
+        raise ValueError("rate and rng must be provided for dropout regularization")
+
     if not (0.0 <= rate < 1.0):
         raise ValueError("rate must be in [0.0, 1.0)")
     
@@ -88,7 +102,6 @@ def dropout_regularization(x: np.ndarray, rate: float, seed: int = 42) -> np.nda
         return x
 
     keep_prob = 1.0 - rate
-    rng = np.random.default_rng(seed)  # Seeded RNG
 
     # Bernoulli mask
     mask = rng.random(size=x.shape) < keep_prob

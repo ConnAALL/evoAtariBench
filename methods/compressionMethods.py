@@ -24,15 +24,26 @@ def convert_to_grayscale(x):
         return x[..., :3].mean(axis=-1)
     raise ValueError("expected (H,W) or (H,W,C)")
 
-def dct_k(x, k, norm="ortho"):
+def dct_k(x, args):
     """Apply 2-D Discrete Cosine Transform to x, and crop the top-left kxk corner"""
+    k = args["k"]
+    norm = args["norm"]
+
+    if not k or not norm:
+        raise ValueError("k and norm must be provided for dct_k")
+
     x = convert_to_grayscale(x).astype(np.float32, copy=False)
-    # Compute 2D DCT directly here
     c = _dct(_dct(x, axis=-1, norm=norm), axis=-2, norm=norm)
     return c[:k, :k].copy()
 
-def dft_k(x, k, norm=None):
+def dft_k(x, args):
     """Apply 2-D Discrete Fourier Transform to x, and crop the center kxk"""
+    k = args["k"]
+    norm = args["norm"]
+
+    if not k or not norm:
+        raise ValueError("k and norm must be provided for dft_k")
+
     x = convert_to_grayscale(x).astype(np.float32, copy=False)
     coeffs = np.fft.fftshift(np.fft.fft2(x, norm=norm))
 
@@ -85,5 +96,3 @@ def aed_encode(x, encoder):
 
 def aed_decode(z, decoder):
     return decoder(z)
-
-

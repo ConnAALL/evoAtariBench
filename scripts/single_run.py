@@ -1,3 +1,7 @@
+"""
+Script for running a single task on a Ray worker
+"""
+
 import argparse
 import json
 import os
@@ -19,6 +23,7 @@ from methods import nonLinearMethods as nm
 from methods import shapingMethods as sm
 
 def make_silent_env(env_name, obs_type, repeat_action_probability, frameskip):
+    """Create an atari environment and redirect the stdout and stderr to /dev/null to avoid the clutter."""
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
     stdout_fd = sys.stdout.fileno()
     stderr_fd = sys.stderr.fileno()
@@ -42,61 +47,41 @@ def make_silent_env(env_name, obs_type, repeat_action_probability, frameskip):
     return env
 
 
-def _normalize_obs(obs):
-    x = np.asarray(obs)
+def normalize_frame(frame):
+    """Normalize the frame to be in the range [0, 1]."""
+    x = np.asarray(frame)
     if x.dtype != np.float32:
         x = x.astype(np.float32, copy=False)
     return x / 255.0
 
 
-def _resolve_nonlinearity(name):
-    if name is None:
-        return None
-    n = name.strip().lower()
-    if n in {"none", "identity", ""}:
-        return None
-    if n in {"quant", "quantization"}:
-        return nm.quantization
-    if n in {"sparse", "sparsification"}:
-        return nm.sparsification
-    if n in {"dropout", "dropout_regularization"}:
-        def _fn(x, args):
-            seed = int(args.get("seed", 42))
-            inner_args = dict(args)
-            inner_args.pop("seed", None)
-            inner_args["rng"] = np.random.default_rng(seed)
-            return nm.dropout_regularization(x, inner_args)
-
-        return _fn
-    raise ValueError(f"Unknown nonlinearity method: {name!r}")
-
-
-def _materialize_features(x):
-    if isinstance(x, tuple) and len(x) == 2:
+def process_features(x):
+    """Process the output of the compression function"""
+    if isinstance(x, tuple) and len(x) == 2:  # If the input is a tuple with two elements, use the first element
         x = x[0]
-    x = np.asarray(x)
-    if np.iscomplexobj(x):
-        x = np.abs(x)
+    x = np.asarray(x)  # Convert the input to a numpy array
     if x.ndim != 2:
         raise ValueError(f"Compression output must be 2D (H,W); got shape={x.shape}")
     return x.astype(np.float32, copy=False)
 
 
 def compute_chromosome_size(feature_shape, output_size):
-    m, n = int(feature_shape[0]), int(feature_shape[1])
+    """Compute the size of the chromosome."""
+    m, n = int(feature_shape[0]), int(feature_shape[1])  # Get the number of rows and columns of the feature shape
     return m + (n * int(output_size)) + int(output_size)
 
 
 class EvoAtariPipelinePolicy:
+    """Class for the EvoAtariPipelinePolicy."""
     def __init__(self, chromosome, output_size, feature_shape, args):
-        self.output_size = int(output_size)
-        self.feature_shape = (int(feature_shape[0]), int(feature_shape[1]))
-        self.args = args
+        """Initialize the EvoAtariPipelinePolicy."""
+        self.output_size = int(output_size)  # Set the output size
+        self.feature_shape = (int(feature_shape[0]), int(feature_shape[1]))  # Set the feature shape
+        self.args = args  # Set the arguments
 
-        self._compression_fn = cm.get_compression_method(args["compression"])
-        self._nonlin_fn = _resolve_nonlinearity(args.get("nonlinearity", None))
-
-        self._process_chromosome(chromosome)
+        self._compression_fn = cm.get_compression_method(args["compression"])  # Set the compression function
+        self._nonlin_fn = nm.get_nonlinearity_method(args.get("nonlinearity", None))  # Set the nonlinearity function
+        self._process_chromosome(chromosome)  # Process the chromosome
 
     def _process_chromosome(self, chromosome):
         m, n = self.feature_shape
@@ -114,9 +99,9 @@ class EvoAtariPipelinePolicy:
         self.b = chromosome[w1_len + w2_len :].reshape(1, self.output_size).astype(np.float32, copy=False)
 
     def forward(self, obs):
-        x = _normalize_obs(obs)
+        x = normalize_frame(obs)
         feats = self._compression_fn(x, self.args)
-        feats = _materialize_features(feats)
+        feats = process_features(feats)
 
         if self._nonlin_fn is not None:
             feats = self._nonlin_fn(feats, self.args)
@@ -140,6 +125,8 @@ def _evaluate_individual(
     max_steps_per_episode,
     args,
 ):
+    """Evaluate the individual."""
+    # Create the policy
     policy = EvoAtariPipelinePolicy(
         chromosome=solution,
         output_size=output_size,
@@ -147,6 +134,7 @@ def _evaluate_individual(
         args=args,
     )
 
+    # Create the environment
     env = make_silent_env(
         env_name=env_name,
         obs_type=obs_type,
@@ -154,16 +142,17 @@ def _evaluate_individual(
         frameskip=frameskip,
     )
 
+    # Evaluate the individual
     total_reward = 0.0
     rows = []
 
-    for ep in range(int(episodes_per_individual)):
+    for ep in range(int(episodes_per_individual)):  # For each episode
         obs, _ = env.reset()
         done = False
         steps = 0
         ep_reward = 0.0
 
-        while not done and steps < int(max_steps_per_episode):
+        while not done and steps < int(max_steps_per_episode):  # While the episode is not done and the steps are less than the maximum steps per episode
             prefs = policy.forward(obs)
             action = int(np.argmax(prefs))
             obs, reward, terminated, truncated, _ = env.step(action)
@@ -180,46 +169,55 @@ def _evaluate_individual(
 
 
 @ray.remote
-def run_task(args, run_id):
-    return _run_task_impl(args, run_id)
+def run_task_remote(args, run_id):
+    """Run the task on a remote Ray worker."""
+    return run_task_local(args, run_id)
 
 
-def _run_task_impl(args, run_id):
-    env_name = args.get("ENV_NAME", "ALE/SpaceInvaders-v5")
-    obs_type = args.get("OBS_TYPE", "grayscale")
-    frameskip = int(args.get("FRAMESKIP", 4))
-    repeat_action_probability = float(args.get("REPEAT_ACTION_PROBABILITY", 0.0))
+def run_task_local(args, run_id):
+    """Run the task on a local machine."""
+    def get_key(key):
+        if key not in args or args[key] is None:
+            raise ValueError(f"Missing required argument {key!r} (must be passed down; got None/missing).")
+        return args[key]
 
-    generations = int(args.get("GENERATIONS", 5000))
-    cma_sigma = float(args.get("CMA_SIGMA", 0.5))
+    env_name = get_key("ENV_NAME")
+    obs_type = get_key("OBS_TYPE")
+    frameskip = int(get_key("FRAMESKIP"))
+    repeat_action_probability = float(get_key("REPEAT_ACTION_PROBABILITY"))
+
+    generations = int(get_key("GENERATIONS"))
+    cma_sigma = float(get_key("CMA_SIGMA"))
+    episodes_per_individual = int(get_key("EPISODES_PER_INDIVIDUAL"))
+    max_steps_per_episode = int(get_key("MAX_STEPS_PER_EPISODE"))
+    verbosity = int(get_key("VERBOSITY_LEVEL"))
     population_size = args.get("POPULATION_SIZE", None)
-    episodes_per_individual = int(args.get("EPISODES_PER_INDIVIDUAL", 1))
-    max_steps_per_episode = int(args.get("MAX_STEPS_PER_EPISODE", 10000))
-    verbosity = int(args.get("VERBOSITY_LEVEL", 1))
-    seed = int(args.get("SEED", 0))
-
     if verbosity >= 1:
         print(f"[Run {run_id}] ENV={env_name} compression={args.get('compression')} nonlinearity={args.get('nonlinearity')}")
 
-    probe_env = make_silent_env(
+    # Create a temporary environment to get the output size
+    temp_env = make_silent_env(
         env_name=env_name,
         obs_type=obs_type,
         repeat_action_probability=repeat_action_probability,
         frameskip=frameskip,
     )
-    output_size = int(probe_env.action_space.n)
-    obs0, _ = probe_env.reset()
-    probe_env.close()
+    output_size = int(temp_env.action_space.n)
+    obs0, _ = temp_env.reset()
+    temp_env.close()
 
+    # Get the compression function and do a forward pass to get the feature shape
     comp_fn = cm.get_compression_method(args["compression"])
-    feats0 = _materialize_features(comp_fn(_normalize_obs(obs0), args))
+    feats0 = process_features(comp_fn(normalize_frame(obs0), args))
     feature_shape = (int(feats0.shape[0]), int(feats0.shape[1]))
     chromosome_size = compute_chromosome_size(feature_shape, output_size)
 
-    inopts = {"seed": seed}
+    # Pure-random init (no explicit seeding).
+    x0 = np.random.default_rng().normal(size=chromosome_size)
+    inopts = {}
     if population_size is not None:
         inopts["popsize"] = int(population_size)
-    es = cma.CMAEvolutionStrategy(np.zeros(chromosome_size), cma_sigma, inopts)
+    es = cma.CMAEvolutionStrategy(x0, cma_sigma, inopts)
 
     fitness_log = []
     best_individuals = []
@@ -229,7 +227,7 @@ def _run_task_impl(args, run_id):
     best_solution_so_far = None
 
     for gen in range(generations):
-        solutions = es.ask()
+        solutions = es.ask()  # Ask the CMA-ES for new solutions in each generation
         results = [
             _evaluate_individual(
                 solution=solutions[i],
@@ -248,20 +246,20 @@ def _run_task_impl(args, run_id):
             for i in range(len(solutions))
         ]
 
-        costs = [None] * len(solutions)
-        avg_rewards = [0.0] * len(solutions)
-        for indiv_idx, avg_reward, rows in results:
+        fitness_vals = [None] * len(solutions)
+        avg_scores = [0.0] * len(solutions)
+        for indiv_idx, avg_score, rows in results:
             fitness_log.extend(rows)
-            costs[indiv_idx] = -float(avg_reward)
-            avg_rewards[indiv_idx] = float(avg_reward)
+            fitness_vals[indiv_idx] = -float(avg_score)  # Because CMA-ES minimizes the fitness function we need to negate the average score
+            avg_scores[indiv_idx] = float(avg_score)
 
-        es.tell(solutions, costs)
+        es.tell(solutions, fitness_vals)
 
-        best_idx = int(np.argmin(costs))
-        best_val = float(avg_rewards[best_idx])
-        avg_val = float(np.mean(avg_rewards))
+        best_idx = int(np.argmin(fitness_vals))
+        best_val = float(avg_scores[best_idx])
+        avg_val = float(np.mean(avg_scores))
 
-        if best_val > best_fitness_so_far:
+        if best_val > best_fitness_so_far:  # If we have a new global best, update the best fitness and solution and log this
             best_fitness_so_far = best_val
             best_solution_so_far = np.asarray(solutions[best_idx]).copy()
             best_individuals.append(
@@ -293,28 +291,3 @@ def _run_task_impl(args, run_id):
         "best_fitness": float(best_fitness_so_far),
         "best_solution": (best_solution_so_far.tolist() if best_solution_so_far is not None else None),
     }
-
-
-def main():
-    parser = argparse.ArgumentParser(description="Train a single EvoAtariBench pipeline task (local debug mode).")
-    parser.add_argument(
-        "--args-json",
-        required=True,
-        help="Either a JSON string or a path to a JSON file containing the args dict.",
-    )
-    args = parser.parse_args()
-
-    raw = args.args_json
-    if os.path.exists(raw):
-        with open(raw, "r") as f:
-            args_dict = json.load(f)
-    else:
-        args_dict = json.loads(raw)
-
-    result = _run_task_impl(args_dict, run_id=1)
-    print(json.dumps({"run_id": result["run_id"], "best_fitness": result["best_fitness"]}, indent=2))
-
-
-if __name__ == "__main__":
-    main()
-

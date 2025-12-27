@@ -16,7 +16,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Add 
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from scripts.evo_train_task import run_task  # This is the function to run a single task on a Ray cluster
+from scripts.single_run import run_task_remote  # This is the function to run a single task on a Ray cluster
 
 # Default arguments for the tasks.
 # These are the common arguments for all tasks.
@@ -45,9 +45,9 @@ COMPRESSION_SWEEP = [
 
 # List of the different non-linearity methods to sweep through.
 NONLINEARITY_SWEEP = [
-    {"nonlinearity": "sparsification", "percentile": [91.0]},
+    {"nonlinearity": "sparsification", "percentile": [90.0]},
     {"nonlinearity": "quantization", "num_levels": [125]},
-    {"nonlinearity": "dropout_regularization", "rate": [0.18], "seed": [42]},
+    {"nonlinearity": "dropout_regularization", "rate": [0.19]},
 ]
 
 
@@ -217,7 +217,7 @@ def main():
     for i, args_dict in enumerate(tasks, start=1):
         cores = int(args_dict.get("CORES_PER_TASK", 1))
         logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
-        ray_tasks.append(run_task.options(num_cpus=cores).remote(args_dict, run_id=i))
+        ray_tasks.append(run_task_remote.options(num_cpus=cores).remote(args_dict, run_id=i))
 
     remaining = set(ray_tasks)  # Set of the remaining tasks to be completed
     while remaining:  # While there are remaining tasks to be completed

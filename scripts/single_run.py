@@ -2,11 +2,10 @@
 Script for running a single task on a Ray worker
 """
 
-import argparse
-import json
 import os
 import sys
-
+import concurrent.futures as cf
+import multiprocessing as mp
 import numpy as np
 import cma
 import gymnasium as gym
@@ -168,6 +167,80 @@ def _evaluate_individual(
     return individual_idx, float(avg_reward), rows
 
 
+def _evaluate_generation_parallel(
+    *,
+    solutions,
+    gen,
+    env_name,
+    obs_type,
+    repeat_action_probability,
+    frameskip,
+    output_size,
+    feature_shape,
+    episodes_per_individual,
+    max_steps_per_episode,
+    args,
+    max_workers,
+):
+    """
+    Evaluate a CMA-ES generation in parallel (one individual per worker process).
+    Returns the same shape as the sequential path: list[(indiv_idx, avg_score, rows)].
+    """
+    if max_workers <= 1 or len(solutions) <= 1:
+        return [
+            _evaluate_individual(
+                solution=solutions[i],
+                individual_idx=i,
+                gen_idx=gen,
+                env_name=env_name,
+                obs_type=obs_type,
+                repeat_action_probability=repeat_action_probability,
+                frameskip=frameskip,
+                output_size=output_size,
+                feature_shape=feature_shape,
+                episodes_per_individual=episodes_per_individual,
+                max_steps_per_episode=max_steps_per_episode,
+                args=args,
+            )
+            for i in range(len(solutions))
+        ]
+
+    def _mp_context_for_platform():
+        if sys.platform.startswith("win") or sys.platform == "darwin":
+            return mp.get_context("spawn")
+        return mp.get_context()
+
+    ctx = _mp_context_for_platform()
+    workers = int(min(max_workers, len(solutions)))
+    results = [None] * len(solutions)
+
+    with cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
+        fut_to_idx = {}
+        for i in range(len(solutions)):
+            fut = ex.submit(
+                _evaluate_individual,
+                solutions[i],
+                i,
+                gen,
+                env_name,
+                obs_type,
+                repeat_action_probability,
+                frameskip,
+                output_size,
+                feature_shape,
+                episodes_per_individual,
+                max_steps_per_episode,
+                args,
+            )
+            fut_to_idx[fut] = i
+
+        for fut in cf.as_completed(fut_to_idx):
+            i = fut_to_idx[fut]
+            results[i] = fut.result()
+
+    return results
+
+
 @ray.remote
 def run_task_remote(args, run_id):
     """Run the task on a remote Ray worker."""
@@ -192,8 +265,11 @@ def run_task_local(args, run_id):
     max_steps_per_episode = int(get_key("MAX_STEPS_PER_EPISODE"))
     verbosity = int(get_key("VERBOSITY_LEVEL"))
     population_size = args.get("POPULATION_SIZE", None)
+    cores_per_task = int(args.get("CORES_PER_TASK", 1))
     if verbosity >= 1:
         print(f"[Run {run_id}] ENV={env_name} compression={args.get('compression')} nonlinearity={args.get('nonlinearity')}")
+        if cores_per_task > 1:
+            print(f"[Run {run_id}] Using CORES_PER_TASK={cores_per_task} for parallel population evaluation")
 
     # Create a temporary environment to get the output size
     temp_env = make_silent_env(
@@ -228,23 +304,20 @@ def run_task_local(args, run_id):
 
     for gen in range(generations):
         solutions = es.ask()  # Ask the CMA-ES for new solutions in each generation
-        results = [
-            _evaluate_individual(
-                solution=solutions[i],
-                individual_idx=i,
-                gen_idx=gen,
-                env_name=env_name,
-                obs_type=obs_type,
-                repeat_action_probability=repeat_action_probability,
-                frameskip=frameskip,
-                output_size=output_size,
-                feature_shape=feature_shape,
-                episodes_per_individual=episodes_per_individual,
-                max_steps_per_episode=max_steps_per_episode,
-                args=args,
-            )
-            for i in range(len(solutions))
-        ]
+        results = _evaluate_generation_parallel(
+            solutions=solutions,
+            gen=gen,
+            env_name=env_name,
+            obs_type=obs_type,
+            repeat_action_probability=repeat_action_probability,
+            frameskip=frameskip,
+            output_size=output_size,
+            feature_shape=feature_shape,
+            episodes_per_individual=episodes_per_individual,
+            max_steps_per_episode=max_steps_per_episode,
+            args=args,
+            max_workers=cores_per_task,
+        )
 
         fitness_vals = [None] * len(solutions)
         avg_scores = [0.0] * len(solutions)

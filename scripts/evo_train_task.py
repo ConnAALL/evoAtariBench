@@ -64,7 +64,8 @@ def _resolve_nonlinearity(name):
             seed = int(args.get("seed", 42))
             inner_args = dict(args)
             inner_args.pop("seed", None)
-            return nm.dropout_regularization(x, inner_args, seed=seed)
+            inner_args["rng"] = np.random.default_rng(seed)
+            return nm.dropout_regularization(x, inner_args)
 
         return _fn
     raise ValueError(f"Unknown nonlinearity method: {name!r}")

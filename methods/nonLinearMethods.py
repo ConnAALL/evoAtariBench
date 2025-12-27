@@ -20,9 +20,8 @@ def quantization(x: np.ndarray, args: dict) -> np.ndarray:
     Returns:
         Quantized array of shape (H, W) or (H, W, C)
     """
-    num_levels = args["num_levels"]
-
-    if not num_levels:
+    num_levels = args.get("num_levels", None)
+    if num_levels is None:
         raise ValueError("num_levels must be provided for quantization")
 
     if int(num_levels) <= 1:  # If the number of quantization levels is less than or equal to 1, raise an error
@@ -59,14 +58,13 @@ def sparsification(x: np.ndarray, args: dict) -> np.ndarray:
     Returns:
         Sparsified array of shape (H, W) or (H, W, C)
     """
-    percentile = args["percentile"]
-
-    if not percentile:
+    percentile = args.get("percentile", None)
+    if percentile is None:
         raise ValueError("percentile must be provided for sparsification")
 
     # If the percentile is not in the range [0, 100], raise an error
     if not (0.0 <= percentile <= 100.0):
-        raise ValueError("q must be in [0, 100]")
+        raise ValueError("percentile must be in [0, 100]")
     
     x = np.asarray(x, dtype=np.float32)  # Convert the input array to a float32 array
 
@@ -82,14 +80,14 @@ def dropout_regularization(x: np.ndarray, args: dict) -> np.ndarray:
 
     Parameters:
         x: Input array of any shape
-        args: Dictionary containing the dropout probability and the random number generator
+        args: Dictionary containing the dropout rate and the random number generator (rng)
 
     Returns:
         Array with dropout regularization applied
     """
-    rate = args["rate"]
-    rng = args["rng"]
-    if not rate or not rng:
+    rate = args.get("rate", None)
+    rng = args.get("rng", None)
+    if rate is None or rng is None:
         raise ValueError("rate and rng must be provided for dropout regularization")
 
     if not (0.0 <= rate < 1.0):

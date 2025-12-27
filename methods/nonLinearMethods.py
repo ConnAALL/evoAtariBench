@@ -86,9 +86,9 @@ def dropout_regularization(x: np.ndarray, args: dict) -> np.ndarray:
         Array with dropout regularization applied
     """
     rate = args.get("rate", None)
-    rng = args.get("rng", None)
-    if rate is None or rng is None:
-        raise ValueError("rate and rng must be provided for dropout regularization")
+    rng = np.random.default_rng()
+    if rate is None:
+        raise ValueError("rate must be provided for dropout regularization")
 
     if not (0.0 <= rate < 1.0):
         raise ValueError("rate must be in [0.0, 1.0)")
@@ -106,3 +106,23 @@ def dropout_regularization(x: np.ndarray, args: dict) -> np.ndarray:
 
     # Apply mask and rescale to maintain expected value
     return np.where(mask, x / keep_prob, 0.0).astype(np.float32, copy=False)
+
+def get_nonlinearity_method(method_name):
+    """Return the non-linearity function for the given method name."""
+    if method_name is None:
+        return None
+
+    n = str(method_name).strip().lower()
+    if n in {"", "none"}:
+        return None
+    if n == "quantization":
+        return quantization
+    if n == "sparsification":
+        return sparsification
+    if n == "dropout_regularization":
+        return dropout_regularization
+
+    raise ValueError(
+        f"Unknown nonlinearity method: {method_name!r}. Expected one of "
+        f"{{'sparsification','quantization','dropout_regularization'}} (or None/'none')."
+    )

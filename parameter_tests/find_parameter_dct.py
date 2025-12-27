@@ -126,7 +126,7 @@ def _nl_score_kind(method: str) -> str:
     return "unknown"
 
 
-def _find_param_by_energy(block: np.ndarray, tau: float, method: str, param_values, seed: int):
+def _find_param_by_energy(block: np.ndarray, tau: float, method: str, param_values):
     """
     Quickscope-style stage-2 search:
     - keep k fixed
@@ -137,21 +137,21 @@ def _find_param_by_energy(block: np.ndarray, tau: float, method: str, param_valu
     """
     if _energy(block) == 0.0:
         params0 = param_values[0]
-        out0 = _apply_nonlinearity(block, method, params0, seed=seed)
+        out0 = _apply_nonlinearity(block, method, params0)
         return params0, 0.0, out0
 
     for params in param_values:
-        out = _apply_nonlinearity(block, method, params, seed=seed)
+        out = _apply_nonlinearity(block, method, params)
         score = _nl_score(block, out, method)
         if score >= tau:
             return params, float(score), out
 
     params = param_values[-1]
-    out = _apply_nonlinearity(block, method, params, seed=seed)
+    out = _apply_nonlinearity(block, method, params)
     return params, float(_nl_score(block, out, method)), out
 
 
-def _apply_nonlinearity(x, method, params, seed):
+def _apply_nonlinearity(x, method, params):
     if method == "sparsification":
         # Use the exact quickscope sparsification implementation for comparability.
         return _sparse_quickscope(x, params["percentile"])
@@ -162,9 +162,13 @@ def _apply_nonlinearity(x, method, params, seed):
             return r + 1j * i
         return quantization(x, params)
     if method == "dropout_regularization":
-        inner = dict(params)
-        inner["rng"] = np.random.default_rng(int(seed))
-        return dropout_regularization(x, inner)
+        # Dropout is now pure random by default (no seeding). If complex, apply
+        # dropout independently to real/imag to preserve complex structure.
+        if np.iscomplexobj(x):
+            r = dropout_regularization(x.real, params)
+            i = dropout_regularization(x.imag, params)
+            return r + 1j * i
+        return dropout_regularization(x, params)
     raise ValueError(method)
 
 
@@ -197,11 +201,10 @@ def _nonzero_fraction(x):
     return float(np.mean(np.abs(x) != 0))
 
 
-def _init_worker(k_values, method_to_params, energy_threshold, seed, dct_norm):
+def _init_worker(k_values, method_to_params, energy_threshold, dct_norm):
     _WORKER["k_values"] = list(k_values)
     _WORKER["method_to_params"] = dict(method_to_params)
     _WORKER["energy_threshold"] = float(energy_threshold)
-    _WORKER["seed"] = int(seed)
     _WORKER["dct_norm"] = dct_norm
 
 
@@ -211,7 +214,6 @@ def _process_one(item):
     method_to_params = _WORKER["method_to_params"]
     tau = _WORKER["energy_threshold"]
     dct_norm = _WORKER["dct_norm"]
-    base_seed = int(_WORKER["seed"])
 
     # Stage 1 (quickscope): choose k using full DCT energy.
     F_full = _dct2(frame, dct_norm)
@@ -233,7 +235,6 @@ def _process_one(item):
             tau,
             method,
             param_values,
-            seed=int(base_seed + int(frame_idx)),
         )
         tau_total = float(_energy(y) / total_E_full) if total_E_full != 0.0 else 0.0
         out["methods"][method] = {
@@ -315,7 +316,7 @@ def main():
     with ctx.Pool(
         processes=nproc,
         initializer=_init_worker,
-        initargs=(k_values, method_to_params, ENERGY_THRESHOLD, SEED, DCT_NORM),
+        initargs=(k_values, method_to_params, ENERGY_THRESHOLD, DCT_NORM),
     ) as pool:
         items = ((i, frames[i]) for i in range(int(N_FRAMES)))
         results = list(pool.imap(_process_one, items, chunksize=int(CHUNKSIZE)))

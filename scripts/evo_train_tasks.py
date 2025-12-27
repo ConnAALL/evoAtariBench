@@ -31,6 +31,7 @@ DEFAULT_ARGS = {
     "POPULATION_SIZE": None,
     "GENERATIONS": 3,
     "VERBOSITY_LEVEL": 1,
+    "REPEATS_PER_CONFIG": 1,
     "CORES_PER_TASK": 1
 }
 
@@ -184,6 +185,15 @@ def main():
     logger.info(f"[Log Start] [Ray Head: {RAY_HEAD}] [Log File: {log_path}]")
 
     tasks = build_tasks()  # Build the tasks from the config dictionaries
+    repeats = int(DEFAULT_ARGS.get("REPEATS_PER_CONFIG", 1))  # Repeat each config N times
+    if repeats < 1:
+        raise ValueError("DEFAULT_ARGS['REPEATS_PER_CONFIG'] must be >= 1")
+    if repeats != 1:
+        expanded = []
+        for t in tasks:
+            for _ in range(repeats):
+                expanded.append(dict(t))
+        tasks = expanded
     if args.dry_run:  # If we are in the dry-run mode, print the tasks and exit
         for i, t in enumerate(tasks, start=1):
             print(json.dumps({"run_id": i, "args": t}, sort_keys=True))

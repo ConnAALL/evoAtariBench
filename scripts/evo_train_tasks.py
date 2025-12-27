@@ -38,12 +38,14 @@ RAY_HEAD = f"{RAY_HEAD_IP}:{RAY_HEAD_PORT}"
 
 # List for different compression methods to sweep through. 
 COMPRESSION_SWEEP = [
-    {"compression": "dct", "k": [50,100], "norm": ["ortho"]},
+    {"compression": "dct", "k": [142], "norm": ["ortho"]},
 ]
 
 # List of the different non-linearity methods to sweep through.
 NONLINEARITY_SWEEP = [
-    {"nonlinearity": "quantization", "num_levels": [16]},
+    {"nonlinearity": "sparsification", "percentile": [91.0]},
+    {"nonlinearity": "quantization", "num_levels": [125]},
+    {"nonlinearity": "dropout_regularization", "rate": [0.18], "seed": [42]},
 ]
 
 

@@ -8,6 +8,8 @@ import json
 import sqlite3
 import argparse
 import itertools
+import logging
+from datetime import datetime
 import ray
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Add the repository root to the Python path
@@ -47,6 +49,46 @@ NONLINEARITY_SWEEP = [
     {"nonlinearity": "quantization", "num_levels": [125]},
     {"nonlinearity": "dropout_regularization", "rate": [0.18], "seed": [42]},
 ]
+
+
+def _setup_logger(repo_root: str):
+    """
+    Create a timestamped log file in data/logs/.
+    Returns (logger, log_path).
+    """
+    data_dir = os.path.join(repo_root, "data")
+    log_dir = os.path.join(data_dir, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = os.path.join(log_dir, f"evo_train_tasks_{ts}.log")
+
+    logger = logging.getLogger("evo_train_tasks")
+    logger.setLevel(logging.INFO)
+    logger.propagate = False
+
+    # Avoid duplicate handlers if main() is called more than once.
+    if not logger.handlers:
+        fmt = logging.Formatter(fmt="[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+
+        fh = logging.FileHandler(log_path)
+        fh.setLevel(logging.INFO)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+
+        # Also mirror logs to stdout so users can pipe/tee driver output easily.
+        sh = logging.StreamHandler(sys.stdout)
+        sh.setLevel(logging.INFO)
+        sh.setFormatter(fmt)
+        logger.addHandler(sh)
+
+    return logger, log_path
+
+
+def _task_params_one_line(args_dict: dict) -> str:
+    """Render only non-default params (exclude DEFAULT_ARGS keys) as a single line."""
+    custom = {k: args_dict[k] for k in sorted(args_dict.keys()) if k not in DEFAULT_ARGS}
+    return json.dumps(custom, sort_keys=True, separators=(",", ":"))
 
 
 def process_dict(d):
@@ -138,6 +180,8 @@ def main():
     data_dir = os.path.join(repo_root, "data")  # Data directory
     os.makedirs(data_dir, exist_ok=True)
     db_path = os.path.join(data_dir, "evo_train_runs.db")  # Path to the SQLite database
+    logger, log_path = _setup_logger(repo_root)
+    logger.info(f"[Log Start] [Ray Head: {RAY_HEAD}] [Log File: {log_path}]")
 
     tasks = build_tasks()  # Build the tasks from the config dictionaries
     if args.dry_run:  # If we are in the dry-run mode, print the tasks and exit
@@ -172,18 +216,30 @@ def main():
     ray_tasks = []
     for i, args_dict in enumerate(tasks, start=1):
         cores = int(args_dict.get("CORES_PER_TASK", 1))
+        logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
         ray_tasks.append(run_task.options(num_cpus=cores).remote(args_dict, run_id=i))
 
     remaining = set(ray_tasks)  # Set of the remaining tasks to be completed
     while remaining:  # While there are remaining tasks to be completed
         done, remaining = ray.wait(list(remaining), num_returns=1, timeout=None)
         finished_ref = done[0]
-        result = ray.get(finished_ref)
+        try:
+            result = ray.get(finished_ref)
+        except Exception as e:
+            logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
+            raise
 
         rid = int(result["run_id"])
         env_name = str(result["env_name"])
         best_fitness = float(result["best_fitness"])
         print(f"⇢ Finished run_id={rid} env={env_name} best_fitness={best_fitness:.2f}")
+        try:
+            task_line = _task_params_one_line(result.get("args", {}))
+        except Exception:
+            task_line = "{}"
+        logger.info(
+            f"[Task End] [run_id={rid}] [env={env_name}] [best_fitness={best_fitness:.6f}] [Task: {task_line}]"
+        )
 
         if cursor is not None and conn is not None:
             task_json = json.dumps(result["args"])
@@ -208,6 +264,7 @@ def main():
         conn.close()
 
     ray.shutdown()
+    logger.info("[Log End]")
 
 
 if __name__ == "__main__":

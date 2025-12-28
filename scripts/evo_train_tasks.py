@@ -10,6 +10,8 @@ import argparse
 import itertools
 import logging
 from datetime import datetime
+
+os.environ["RAY_DEDUP_LOGS"] = "0"  # Disable the automatic deduplication of logs
 import ray
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Add the repository root to the Python path
@@ -32,7 +34,6 @@ DEFAULT_ARGS = {
     "GENERATIONS": 500,
     "VERBOSITY_LEVEL": 1,
     "REPEATS_PER_CONFIG": 10,
-    "CORES_PER_TASK": 15
 }
 
 RAY_HEAD_IP = "136.244.224.234"
@@ -225,9 +226,8 @@ def main():
 
     ray_tasks = []
     for i, args_dict in enumerate(tasks, start=1):
-        cores = int(args_dict.get("CORES_PER_TASK", 1))
         logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
-        ray_tasks.append(run_task_remote.options(num_cpus=cores).remote(args_dict, run_id=i))
+        ray_tasks.append(run_task_remote.options(num_cpus=1).remote(args_dict, run_id=i))
 
     remaining = set(ray_tasks)  # Set of the remaining tasks to be completed
     while remaining:  # While there are remaining tasks to be completed

@@ -344,6 +344,9 @@ def run_task_local(args, run_id):
 
         plot_data.append([float(gen + 1), float(best_val), float(avg_val)])
 
+        if verbosity >= 1:
+            print(f"[Run {int(run_id):02d}] [GEN {int(gen + 1):04d}] [BEST {best_val:.2f}] [AVG {avg_val:.2f}]")
+
     return {
         "run_id": int(run_id),
         "args": args,

@@ -10,6 +10,9 @@ import argparse
 import itertools
 import logging
 from datetime import datetime
+import yaml
+
+os.environ["RAY_DEDUP_LOGS"] = "0"  # Disable the automatic deduplication of logs
 import ray
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Add the repository root to the Python path
@@ -19,21 +22,9 @@ if _REPO_ROOT not in sys.path:
 from scripts.single_run import run_task_remote  # This is the function to run a single task on a Ray cluster
 
 # Default arguments for the tasks.
-# These are the common arguments for all tasks.
-DEFAULT_ARGS = {
-    "ENV_NAME": "ALE/SpaceInvaders-v5",
-    "OBS_TYPE": "grayscale",
-    "FRAMESKIP": 4,
-    "REPEAT_ACTION_PROBABILITY": 0.0,
-    "MAX_STEPS_PER_EPISODE": 10000,
-    "EPISODES_PER_INDIVIDUAL": 1,
-    "CMA_SIGMA": 0.5,
-    "POPULATION_SIZE": None,
-    "GENERATIONS": 500,
-    "VERBOSITY_LEVEL": 1,
-    "REPEATS_PER_CONFIG": 10,
-    "CORES_PER_TASK": 15
-}
+_DEFAULT_ARGS_PATH = os.path.join(os.path.dirname(__file__), "config.yml")
+with open(_DEFAULT_ARGS_PATH, "r", encoding="utf-8") as f:
+    DEFAULT_ARGS = yaml.safe_load(f) or {}
 
 RAY_HEAD_IP = "136.244.224.234"
 RAY_HEAD_PORT = 6379

@@ -268,8 +268,6 @@ def run_task_local(args, run_id):
     cores_per_task = int(args.get("CORES_PER_TASK", 1))
     if verbosity >= 1:
         print(f"[Run {run_id}] ENV={env_name} compression={args.get('compression')} nonlinearity={args.get('nonlinearity')}")
-        if cores_per_task > 1:
-            print(f"[Run {run_id}] Using CORES_PER_TASK={cores_per_task} for parallel population evaluation")
 
     # Create a temporary environment to get the output size
     temp_env = make_silent_env(
@@ -343,11 +341,6 @@ def run_task_local(args, run_id):
                     "solution": best_solution_so_far.tolist(),
                 }
             )
-            if verbosity >= 1:
-                print(f"[Run {run_id}][GEN {gen+1}] NEW GLOBAL BEST: {best_val:.2f}")
-
-        if verbosity >= 1:
-            print(f"[Run {run_id}][GEN {gen+1}] BEST: {best_val:.2f}  AVG: {avg_val:.2f}")
 
         plot_data.append([float(gen + 1), float(best_val), float(avg_val)])
 

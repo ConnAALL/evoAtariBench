@@ -19,7 +19,6 @@ NONLINEARITY_METHODS = (
 FRAME_H = 210
 FRAME_W = 160
 N_FRAMES = 10000
-SEED = 0
 
 ENERGY_THRESHOLD = 0.9
 
@@ -302,8 +301,8 @@ def _print_summary(method, ks, params_list, tau_k_list, tau_nl_list, tau_total_l
 
 
 def main():
-    rng = np.random.default_rng(SEED)
-    frames = rng.random((N_FRAMES, FRAME_H, FRAME_W), dtype=np.float32)
+    # np.random.random does not support a dtype= kwarg on RandomState; generate then cast.
+    frames = np.random.default_rng().random((N_FRAMES, FRAME_H, FRAME_W)).astype(np.float32, copy=False)
 
     k_max = min(int(FRAME_H), int(FRAME_W)) if K_MAX is None else min(int(K_MAX), int(FRAME_H), int(FRAME_W))
     k_values = list(range(int(K_MIN), int(k_max) + 1, int(K_STEP)))

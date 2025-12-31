@@ -47,6 +47,36 @@ def quantization(x: np.ndarray, args: dict) -> np.ndarray:
     # Scale the quantized array back to the original range
     return y * scale + x_min
 
+
+def quantization_complex(x: np.ndarray, args: dict) -> np.ndarray:
+    """
+    Apply uniform quantization to a complex-valued array
+
+    Parameters:
+        x    : complex ndarray
+        args : dict containing 'num_levels'
+
+    Returns:
+        Complex ndarray with quantized magnitude and preserved phase
+    """
+    if not np.iscomplexobj(x):
+        raise ValueError("Input must be a complex-valued array")
+
+    # Compute magnitude
+    mag = np.abs(x).astype(np.float32)
+
+    # Quantize magnitude using existing function
+    mag_q = quantization(mag, args)
+
+    # If magnitude is zero everywhere, just return zeros
+    # (avoids division by zero)
+    eps = 1e-8
+    scale = mag_q / (mag + eps)
+
+    # Apply scaling to preserve phase
+    return (x * scale).astype(np.complex64, copy=False)
+
+
 def sparsification(x: np.ndarray, args: dict) -> np.ndarray:
     """
     Function for sparsifying the input array based on a percentile.
@@ -73,6 +103,42 @@ def sparsification(x: np.ndarray, args: dict) -> np.ndarray:
 
     # Sparsify the input array based on the percentile
     return np.where(np.abs(x) >= thr, x, 0.0).astype(np.float32, copy=False)
+
+
+def sparsification_complex(x: np.ndarray, args: dict) -> np.ndarray:
+    """
+    Sparsify a complex-valued array using magnitude-based thresholding, while preserving phase consistency.
+
+    Parameters:
+        x: Complex ndarray
+        args: Dictionary containing 'percentile'
+
+    Returns:
+        Complex ndarray with both real and imaginary parts sparsified.
+    """
+    if not np.iscomplexobj(x):
+        raise ValueError("Input must be a complex-valued array")
+
+    percentile = args.get("percentile", None)
+    if percentile is None:
+        raise ValueError("percentile must be provided for sparsification")
+
+    if not (0.0 <= percentile <= 100.0):
+        raise ValueError("percentile must be in [0, 100]")
+
+    # Compute magnitude
+    mag = np.abs(x)
+
+    # Threshold on magnitude
+    thr = np.percentile(mag, percentile)
+    mask = mag >= thr
+
+    # Apply mask to both real and imaginary parts
+    real = np.where(mask, x.real, 0.0)
+    imag = np.where(mask, x.imag, 0.0)
+
+    return (real + 1j * imag).astype(np.complex64, copy=False)
+
 
 def dropout_regularization(x: np.ndarray, args: dict) -> np.ndarray:
     """
@@ -107,6 +173,37 @@ def dropout_regularization(x: np.ndarray, args: dict) -> np.ndarray:
     # Apply mask and rescale to maintain expected value
     return np.where(mask, x / keep_prob, 0.0).astype(np.float32, copy=False)
 
+def dropout_regularization_complex(x: np.ndarray, args: dict) -> np.ndarray:
+    """
+    Apply dropout regularization to a complex-valued array by
+    calling the existing real-valued dropout function on the magnitude,
+    then applying the same mask to both real and imaginary parts.
+
+    Parameters:
+        x    : complex ndarray
+        args : dict containing 'rate'
+
+    Returns:
+        Complex ndarray with dropout applied
+    """
+    if not np.iscomplexobj(x):
+        raise ValueError("Input must be a complex-valued array")
+
+    rate = args.get("rate", None)
+    if rate is None:
+        raise ValueError("rate must be provided for dropout regularization")
+
+    # Use existing dropout on magnitude to generate a mask
+    mag = np.abs(x)
+    mag_dropped = dropout_regularization(mag, args)
+
+    # Dropout mask: kept entries are non-zero
+    mask = mag_dropped != 0.0
+
+    # IMPORTANT: rescale complex values to preserve expectation
+    keep_prob = 1.0 - rate
+    return np.where(mask, x / keep_prob, 0.0).astype(np.complex64, copy=False)
+
 def get_nonlinearity_method(method_name):
     """Return the non-linearity function for the given method name."""
     if method_name is None:
@@ -117,12 +214,17 @@ def get_nonlinearity_method(method_name):
         return None
     if n == "quantization":
         return quantization
+    if n == "quantization_complex":
+        return quantization_complex
     if n == "sparsification":
         return sparsification
+    if n == "sparsification_complex":
+        return sparsification_complex
     if n == "dropout_regularization":
         return dropout_regularization
-
+    if n == "dropout_regularization_complex":
+        return dropout_regularization_complex
     raise ValueError(
         f"Unknown nonlinearity method: {method_name!r}. Expected one of "
-        f"{{'sparsification','quantization','dropout_regularization'}} (or None/'none')."
+        f"{{'sparsification','sparsification_complex','quantization','quantization_complex','dropout_regularization','dropout_regularization_complex'}} (or None/'none')."
     )

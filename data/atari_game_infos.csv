@@ -1,4 +1,4 @@
-Environment,ActionSpaceType,ActionSpaceSize,ObsRows,ObsCols
+environment,action_space_type,action_space_size,obs_rows,obs_cols
 ALE/Othello-v5,Discrete,10,210,160
 ALE/FlagCapture-v5,Discrete,18,210,160
 ALE/Krull-v5,Discrete,18,210,160

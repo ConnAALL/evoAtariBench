@@ -30,6 +30,15 @@ RAY_HEAD_IP = "136.244.224.234"
 RAY_HEAD_PORT = 6379
 RAY_HEAD = f"{RAY_HEAD_IP}:{RAY_HEAD_PORT}"
 
+# List of Atari games to sweep through.
+ENV_SWEEP = [
+    {"ENV_NAME": [
+        "ALE/Othello-v5",
+        "ALE/FlagCapture-v5",
+        "ALE/Krull-v5",
+    ]},
+]
+
 # List for different compression methods to sweep through. 
 COMPRESSION_SWEEP = [
     {"compression": "dct", "k": [142], "norm": ["ortho"]},
@@ -38,8 +47,6 @@ COMPRESSION_SWEEP = [
 # List of the different non-linearity methods to sweep through.
 NONLINEARITY_SWEEP = [
     {"nonlinearity": "sparsification", "percentile": [90.0]},
-    {"nonlinearity": "quantization", "num_levels": [125]},
-    {"nonlinearity": "dropout_regularization", "rate": [0.19]},
 ]
 
 
@@ -78,8 +85,11 @@ def _setup_logger(repo_root: str):
 
 
 def _task_params_one_line(args_dict: dict) -> str:
-    """Render only non-default params (exclude DEFAULT_ARGS keys) as a single line."""
-    custom = {k: args_dict[k] for k in sorted(args_dict.keys()) if k not in DEFAULT_ARGS}
+    """
+    Render only non-default params (keys not in DEFAULT_ARGS OR values that differ from DEFAULT_ARGS)
+    as a single line. This ensures sweeps (e.g., ENV_NAME) show up in logs even if the key exists in the defaults.
+    """
+    custom = {k: args_dict[k] for k in sorted(args_dict.keys()) if (k not in DEFAULT_ARGS) or (args_dict.get(k) != DEFAULT_ARGS.get(k))}
     return json.dumps(custom, sort_keys=True, separators=(",", ":"))
 
 
@@ -113,6 +123,10 @@ def process_dict(d):
 
 def build_tasks():
     """Function for building the tasks from the compression and nonlinearity informations."""
+    envs = []  # List of the environments to go through. It unpacks the environment sweep into a list of dictionaries.
+    for base in ENV_SWEEP:
+        envs.extend(process_dict(base))
+
     comps = []  # List of the compression methods to go through. It unpacks the compression sweep into a list of dictionaries.
     for base in COMPRESSION_SWEEP:
         comps.extend(process_dict(base))
@@ -122,13 +136,15 @@ def build_tasks():
         nonlins.extend(process_dict(base))
 
     tasks = []
-    for c in comps:
-        for n in nonlins:
-            # For each compression and nonlinearity method, create a new task.
-            args = dict(DEFAULT_ARGS)  # Start with the default arguments.
-            args.update(c)  # Update the arguments with the compression and nonlinearity methods.
-            args.update(n)
-            tasks.append(args)  # Add the new task to the list of tasks.
+    for env in envs:
+        for comp in comps:
+            for nonlin in nonlins:
+                # For each environment, compression and nonlinearity method, create a new task.
+                args = dict(DEFAULT_ARGS)  # Start with the default arguments.
+                args.update(env)
+                args.update(comp)
+                args.update(nonlin)
+                tasks.append(args)  # Add the new task to the list of tasks.
     return tasks
 
 

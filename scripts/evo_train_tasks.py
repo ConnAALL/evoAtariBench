@@ -4,13 +4,14 @@ Main script for assigning tasks to a Ray cluster.
 
 import os
 import sys
+import csv
 import json
+import yaml
+import logging
 import sqlite3
 import argparse
 import itertools
-import logging
 from datetime import datetime
-import yaml
 
 os.environ["RAY_DEDUP_LOGS"] = "0"  # Disable the automatic deduplication of logs
 import ray
@@ -33,9 +34,7 @@ RAY_HEAD = f"{RAY_HEAD_IP}:{RAY_HEAD_PORT}"
 # List of Atari games to sweep through.
 ENV_SWEEP = [
     {"ENV_NAME": [
-        "ALE/Othello-v5",
-        "ALE/FlagCapture-v5",
-        "ALE/Krull-v5",
+        "ALE/SpaceInvaders-v5",
     ]},
 ]
 
@@ -91,6 +90,23 @@ def _task_params_one_line(args_dict: dict) -> str:
     """
     custom = {k: args_dict[k] for k in sorted(args_dict.keys()) if (k not in DEFAULT_ARGS) or (args_dict.get(k) != DEFAULT_ARGS.get(k))}
     return json.dumps(custom, sort_keys=True, separators=(",", ":"))
+
+
+def _load_all_env_names(repo_root: str) -> list[str]:
+    """Load all Atari environment names from data/atari_game_infos.csv"""
+    csv_path = os.path.join(repo_root, "data", "atari_game_infos.csv")
+    envs: list[str] = []
+    with open(csv_path, "r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames is None or "environment" not in reader.fieldnames:
+            raise ValueError(f"Expected column 'environment' in {csv_path}")
+        for row in reader:
+            name = (row.get("environment") or "").strip()
+            if name:
+                envs.append(name)
+    if not envs:
+        raise ValueError(f"No environments found in {csv_path}")
+    return envs
 
 
 def process_dict(d):
@@ -179,6 +195,7 @@ def get_args():
     parser = argparse.ArgumentParser(description="Dispatch EvoAtariBench training tasks to a Ray cluster.")
     parser.add_argument("--dry-run", action="store_true", help="Print the expanded task list (preview) and exit without running Ray.")
     parser.add_argument("--no-save", action="store_true", help="Do not write results to SQLite; only print progress.")
+    parser.add_argument("--all-games", action="store_true", help="Sweep through every environment listed in data/atari_game_infos.csv.")
     return parser.parse_args()
 
 
@@ -190,6 +207,12 @@ def main():
     db_path = os.path.join(data_dir, "evo_train_runs.db")  # Path to the SQLite database
     logger, log_path = _setup_logger(repo_root)
     logger.info(f"[Log Start] [Ray Head: {RAY_HEAD}] [Log File: {log_path}]")
+
+    if args.all_games:  # If we are in the all-games mode, load all the environments from the data/atari_game_infos.csv
+        all_envs = _load_all_env_names(repo_root)
+        global ENV_SWEEP
+        ENV_SWEEP = [{"ENV_NAME": all_envs}]
+        logger.info(f"[All Games] Loaded {len(all_envs)} environments from data/atari_game_infos.csv")
 
     tasks = build_tasks()  # Build the tasks from the config dictionaries
     repeats = int(DEFAULT_ARGS.get("REPEATS_PER_CONFIG", 1))  # Repeat each config N times

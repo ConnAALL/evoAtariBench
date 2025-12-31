@@ -1,5 +1,6 @@
 out
-data
+logs
 temp
 .DS_Store
 __pycache__
+**/*.db

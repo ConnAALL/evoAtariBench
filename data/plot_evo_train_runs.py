@@ -5,8 +5,12 @@ import sqlite3
 from collections import defaultdict
 import numpy as np
 import matplotlib.pyplot as plt
-import scienceplots
+import scienceplots  # noqa: F401
+
 plt.style.use(["science", "no-latex"])
+
+ENV_FILTER = "ALE/SpaceInvaders-v5"
+
 
 class RunSeries:
     def __init__(self, row_id, run_id, env_name, compression, nonlinearity, signature, gens, vals):
@@ -204,7 +208,7 @@ def main():
     out_dir = os.path.abspath(os.path.join(repo_root, "plots", "evo_train_runs"))
     metric = "avg"
     write_mean_only = False
-    env_filter = None
+    env_filter = ENV_FILTER
 
     runs = _load_runs(db_path, metric=metric, env_filter=env_filter)
     if not runs:
@@ -264,3 +268,5 @@ def main():
 
 if __name__ == "__main__":
     raise SystemExit(main())
+
+

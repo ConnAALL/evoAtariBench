@@ -58,7 +58,7 @@ def idft_k(block, out_hw, output="real", norm=None, dtype=np.float32):
 
     raise ValueError
 
-def dwt_keep_scales_inv(arr, meta, output="real"):
+def idwt(arr, meta, output="real"):
     arr = np.asarray(arr)
 
     slices = meta["slices"]
@@ -83,7 +83,7 @@ def dwt_keep_scales_inv(arr, meta, output="real"):
 INVERSE_METHODS = {
     "idct_k": idct_k,
     "idft_k": idft_k,
-    "dwt_keep_scales_inv": dwt_keep_scales_inv,
+    "dwt_keep_scales_inv": idwt,
 }
 
 def get_inverse(name):

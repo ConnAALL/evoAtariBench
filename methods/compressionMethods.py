@@ -69,32 +69,30 @@ def conv2d(x, kernel, mode="same", boundary="symm", fillvalue=0.0):
     return _convolve2d(x, k, mode=mode, boundary=boundary, fillvalue=fillvalue).astype(np.float32)
 
 
-def dwt_keep_scales_fwd(x, wavelet="bior4.4", levels=4, keep_levels=1, mode="symmetric"):
-    """Apply 2-D Wavelet Transform to x, and keep the top k scales"""
+def dwt(x, args):
+    """
+    Forward 2-D DWT returning (packed_coeff_array, meta) so inverse can reconstruct.
+
+    meta contains the slices mapping and parameters needed for inv.idwt.
+    """
+    wavelet = args.get("wavelet", "bior4.4")
+    levels = int(args.get("levels", 4))
+    mode = args.get("mode", "symmetric")
+
     x = convert_to_grayscale(x).astype(np.float32, copy=False)
-    levels = int(levels)
 
     coeffs = pywt.wavedec2(x, wavelet=wavelet, level=levels, mode=mode)
+    coeff_arr, slices = pywt.coeffs_to_array(coeffs)
 
-    keep_levels = int(keep_levels)
-    keep_levels = max(0, min(levels, keep_levels))
-
-    out = [coeffs[0]]
-    for i in range(levels):
-        if i < keep_levels:
-            out.append(coeffs[i + 1])
-        else:
-            out.append(tuple(np.zeros_like(b) for b in coeffs[i + 1]))
-
-    arr, slices = pywt.coeffs_to_array(out)
     meta = {
         "slices": slices,
         "wavelet": wavelet,
         "levels": levels,
         "mode": mode,
-        "shape": x.shape,
+        "shape": x.shape,  # original (H, W)
     }
-    return arr.astype(np.float32, copy=False), meta
+
+    return coeff_arr.astype(np.float32, copy=False), meta
 
 
 def aed_encode(x, encoder):
@@ -103,14 +101,6 @@ def aed_encode(x, encoder):
 
 def aed_decode(z, decoder):
     return decoder(z)
-
-
-def dwt(x, args):
-    wavelet = args.get("wavelet", "bior4.4")
-    levels = args.get("levels", 4)
-    keep_levels = args.get("keep_levels", 1)
-    mode = args.get("mode", "symmetric")
-    return dwt_keep_scales_fwd(x, wavelet=wavelet, levels=levels, keep_levels=keep_levels, mode=mode)
 
 
 def get_compression_method(name):

@@ -221,6 +221,7 @@ def get_args():
     parser.add_argument("--dry-run", action="store_true", help="Print the expanded task list (preview) and exit without running Ray.")
     parser.add_argument("--no-save", action="store_true", help="Do not write results to SQLite; only print progress.")
     parser.add_argument("--all-games", action="store_true", help="Sweep through every environment listed in data/atari_game_infos.csv.")
+    parser.add_argument("--db-name", default="evo_train_runs.db", help="SQLite DB filename to write under data/ (or pass a full path). Default: evo_train_runs.db")
     return parser.parse_args()
 
 
@@ -229,7 +230,8 @@ def main():
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Root of the repository
     data_dir = os.path.join(repo_root, "data")  # Data directory
     os.makedirs(data_dir, exist_ok=True)
-    db_path = os.path.join(data_dir, "evo_train_runs.db")  # Path to the SQLite database
+    db_name = str(args.db_name)
+    db_path = db_name if os.path.isabs(db_name) or (os.sep in db_name) else os.path.join(data_dir, db_name)
     logger, log_path = _setup_logger(repo_root)
     logger.info(f"[Log Start] [Ray Head: {RAY_HEAD}] [Log File: {log_path}]")
 

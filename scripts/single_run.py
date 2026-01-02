@@ -30,7 +30,7 @@ def perform_noop_actions(env, obs, args, max_noops: int = 30):
         return obs
 
     # Assumption: NOOP is always action 0
-    noop_action = 0
+    noop_action = env.unwrapped.get_action_meanings().index("NOOP")
     if max_noops <= 0:  # If the max number of noop actions is less than or equal to 0, return the observation
         return obs
 

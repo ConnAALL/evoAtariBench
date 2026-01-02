@@ -21,6 +21,31 @@ from methods import compressionMethods as cm
 from methods import nonLinearMethods as nm
 from methods import shapingMethods as sm
 
+def perform_noop_actions(env, obs, args, max_noops: int = 30):
+    """
+    If the config includes a random noop, perform a random number of noop actions (sampled from a uniform distribution from 0 to max_noops)
+    to randomize the start state.
+    """
+    if not args.get("RANDOM_INIT", False):  # If the random noop is not specified, return the observation
+        return obs
+
+    # Assumption: NOOP is always action 0
+    noop_action = 0
+    if max_noops <= 0:  # If the max number of noop actions is less than or equal to 0, return the observation
+        return obs
+
+    n_noops = int(np.random.default_rng().integers(0, max_noops + 1))  # Sample a random number of noop actions from the uniform distribution
+    remaining = int(n_noops)
+    while remaining > 0:  # While the remaining number of noop actions is greater than 0, perform a noop action
+        obs, _, terminated, truncated, _ = env.step(noop_action)  # Step the environment with the noop action
+        if bool(terminated) or bool(truncated):  # If the episode is terminated or truncated, reset the environment and perform a random number of noop actions again
+            obs, _ = env.reset()
+            obs = perform_noop_actions(env, obs, args, max_noops)
+            break
+        remaining -= 1  # Decrement the remaining number of noop actions
+    return obs
+
+
 def make_silent_env(env_name, obs_type, repeat_action_probability, frameskip):
     """Create an atari environment and redirect the stdout and stderr to /dev/null to avoid the clutter."""
     devnull_fd = os.open(os.devnull, os.O_WRONLY)
@@ -147,6 +172,7 @@ def _evaluate_individual(
 
     for ep in range(int(episodes_per_individual)):  # For each episode
         obs, _ = env.reset()
+        obs = perform_noop_actions(env, obs, args)
         done = False
         steps = 0
         ep_reward = 0.0
@@ -278,6 +304,7 @@ def run_task_local(args, run_id):
     )
     output_size = int(temp_env.action_space.n)
     obs0, _ = temp_env.reset()
+    obs0 = perform_noop_actions(temp_env, obs0, args)
     temp_env.close()
 
     # Get the compression function and do a forward pass to get the feature shape

@@ -10,6 +10,9 @@ import scienceplots  # noqa: F401
 plt.style.use(["science", "no-latex"])
 
 ENV_FILTER = "ALE/SpaceInvaders-v5"
+PLOT_ALL_GAMES = True
+PLOT_YLIM_0_10000 = True
+YLIM_0_10000 = (0, 10000)
 
 
 class RunSeries:
@@ -91,6 +94,16 @@ def _mean_curve(series):
     return xs, means, stds
 
 
+def _apply_ylim(ax, ylim):
+    if ylim is None:
+        return
+    try:
+        lo, hi = ylim
+        ax.set_ylim(lo, hi)
+    except Exception:
+        pass
+
+
 def _load_runs(db_path, metric, env_filter):
     con = sqlite3.connect(db_path, timeout=30.0)
     try:
@@ -133,6 +146,7 @@ def _plot_individuals_and_mean(
     title,
     ylabel,
     out_path,
+    ylim=None,
 ):
     xs, mean, _std = _mean_curve(series)
 
@@ -146,6 +160,7 @@ def _plot_individuals_and_mean(
     ax.set_ylabel(ylabel)
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best")
+    _apply_ylim(ax, ylim)
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.tight_layout()
@@ -159,6 +174,7 @@ def _plot_mean_only(
     title,
     ylabel,
     out_path,
+    ylim=None,
 ):
     xs, mean, std = _mean_curve(series)
 
@@ -171,6 +187,7 @@ def _plot_mean_only(
     ax.set_ylabel(ylabel)
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best")
+    _apply_ylim(ax, ylim)
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.tight_layout()
@@ -184,6 +201,7 @@ def _plot_compression_compare_nonlinearity(
     title,
     ylabel,
     out_path,
+    ylim=None,
 ):
     fig, ax = plt.subplots(figsize=(9, 5))
     for nl, series in sorted(by_nl.items(), key=lambda kv: kv[0]):
@@ -195,6 +213,33 @@ def _plot_compression_compare_nonlinearity(
     ax.set_ylabel(ylabel)
     ax.grid(True, alpha=0.25)
     ax.legend(loc="best")
+    _apply_ylim(ax, ylim)
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=200)
+    plt.close(fig)
+
+
+def _plot_game_compare_compression(
+    *,
+    by_comp,
+    title,
+    ylabel,
+    out_path,
+    ylim=None,
+):
+    fig, ax = plt.subplots(figsize=(9, 5))
+    for comp, series in sorted(by_comp.items(), key=lambda kv: kv[0]):
+        xs, mean, _std = _mean_curve(series)
+        ax.plot(xs, mean, linewidth=2.25, label=f"{comp} (n={len(series)})")
+
+    ax.set_title(title)
+    ax.set_xlabel("generation")
+    ax.set_ylabel(ylabel)
+    ax.grid(True, alpha=0.25)
+    ax.legend(loc="best")
+    _apply_ylim(ax, ylim)
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.tight_layout()
@@ -208,7 +253,7 @@ def main():
     out_dir = os.path.abspath(os.path.join(repo_root, "plots", "evo_train_runs"))
     metric = "avg"
     write_mean_only = False
-    env_filter = ENV_FILTER
+    env_filter = None if PLOT_ALL_GAMES else ENV_FILTER
 
     runs = _load_runs(db_path, metric=metric, env_filter=env_filter)
     if not runs:
@@ -216,6 +261,8 @@ def main():
         return 1
 
     ylabel = "avg reward" if metric == "avg" else "best reward"
+    zoom_ylim = YLIM_0_10000 if PLOT_YLIM_0_10000 else None
+    zoom_dir = os.path.join(out_dir, "zoom_0_10000")
 
     groups = defaultdict(list)
     for r in runs:
@@ -238,6 +285,14 @@ def main():
             ylabel=ylabel,
             out_path=os.path.join(out_dir, f"{base}__individuals.png"),
         )
+        if zoom_ylim is not None:
+            _plot_individuals_and_mean(
+                series=series,
+                title=title_base + " individuals + mean [ylim 0..10000]",
+                ylabel=ylabel,
+                out_path=os.path.join(zoom_dir, f"{base}__individuals.png"),
+                ylim=zoom_ylim,
+            )
         if bool(write_mean_only):
             _plot_mean_only(
                 series=series,
@@ -245,6 +300,14 @@ def main():
                 ylabel=ylabel,
                 out_path=os.path.join(out_dir, f"{base}__mean.png"),
             )
+            if zoom_ylim is not None:
+                _plot_mean_only(
+                    series=series,
+                    title=title_base + " mean [ylim 0..10000]",
+                    ylabel=ylabel,
+                    out_path=os.path.join(zoom_dir, f"{base}__mean.png"),
+                    ylim=zoom_ylim,
+                )
 
     by_comp = defaultdict(lambda: defaultdict(list))
     for (comp, nl), series in groups.items():
@@ -261,6 +324,40 @@ def main():
             ylabel=ylabel,
             out_path=out_path,
         )
+        if zoom_ylim is not None:
+            out_path = os.path.join(zoom_dir, f"{_slug(comp)}__compare_nonlinearity__{metric}.png")
+            _plot_compression_compare_nonlinearity(
+                by_nl=by_nl,
+                title=f"{comp} compare nonlinearities (mean curves) [{metric}] [ylim 0..10000]",
+                ylabel=ylabel,
+                out_path=out_path,
+                ylim=zoom_ylim,
+            )
+
+    by_env = defaultdict(lambda: defaultdict(list))
+    for r in runs:
+        by_env[r.env_name][r.compression].append(r)
+
+    for env_name, by_comp_for_env in sorted(by_env.items(), key=lambda kv: kv[0]):
+        title = f"{env_name} compare compressions (mean curves) [{metric}]"
+        out_path = os.path.join(out_dir, "by_game", f"{_slug(env_name)}__compare_compression__{metric}.png")
+        _plot_game_compare_compression(
+            by_comp=by_comp_for_env,
+            title=title,
+            ylabel=ylabel,
+            out_path=out_path,
+        )
+        if zoom_ylim is not None:
+            out_path = os.path.join(
+                out_dir, "by_game", "zoom_0_10000", f"{_slug(env_name)}__compare_compression__{metric}.png"
+            )
+            _plot_game_compare_compression(
+                by_comp=by_comp_for_env,
+                title=f"{env_name} compare compressions (mean curves) [{metric}] [ylim 0..10000]",
+                ylabel=ylabel,
+                out_path=out_path,
+                ylim=zoom_ylim,
+            )
 
     print(f"Wrote plots to: {out_dir}")
     return 0

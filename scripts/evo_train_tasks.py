@@ -38,6 +38,12 @@ ENV_SWEEP = [
     ]},
 ]
 
+# Randomness override groups.
+RANDOMNESS_OVERRIDE_GROUPS = [
+    {"REPEAT_ACTION_PROBABILITY": 0.25},
+    {"RANDOM_INIT": True},
+]
+
 # List for different compression methods to sweep through. 
 COMPRESSION_SWEEP = [
     {"compression": "dct", "k": [142], "norm": ["ortho"]},
@@ -137,6 +143,23 @@ def process_dict(d):
     return tasks
 
 
+def expand_override_combinations(base: dict, override_groups: list[dict]) -> list[dict]:
+    """
+    Return all combinations that can be made by applying the override_groups to the base.
+    """
+    if not override_groups:
+        return [dict(base)]
+
+    combos: list[dict] = []
+    for mask in itertools.product([0, 1], repeat=len(override_groups)):
+        out = dict(base)
+        for use, overrides in zip(mask, override_groups):
+            if use:
+                out.update(overrides)
+        combos.append(out)
+    return combos
+
+
 def build_tasks():
     """Function for building the tasks from the compression and nonlinearity informations."""
     envs = []  # List of the environments to go through. It unpacks the environment sweep into a list of dictionaries.
@@ -156,11 +179,13 @@ def build_tasks():
         for comp in comps:
             for nonlin in nonlins:
                 # For each environment, compression and nonlinearity method, create a new task.
-                args = dict(DEFAULT_ARGS)  # Start with the default arguments.
-                args.update(env)
-                args.update(comp)
-                args.update(nonlin)
-                tasks.append(args)  # Add the new task to the list of tasks.
+                base_args = dict(DEFAULT_ARGS)  # Start with the default arguments.
+                base_args.update(env)
+                base_args.update(comp)
+                base_args.update(nonlin)
+
+                # Expand into the desired randomness variants (sticky / random NOOP / both).
+                tasks.extend(expand_override_combinations(base_args, RANDOMNESS_OVERRIDE_GROUPS))
     return tasks
 
 

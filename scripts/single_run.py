@@ -293,7 +293,10 @@ def run_task_local(args, run_id):
     population_size = args.get("POPULATION_SIZE", None)
     cores_per_task = int(args.get("CORES_PER_TASK", 1))
     if verbosity >= 1:
-        print(f"[Run {run_id}] ENV={env_name} compression={args.get('compression')} nonlinearity={args.get('nonlinearity')}")
+        try:
+            print(f"[Run {run_id}] ENV={env_name} compression={args.get('compression')} nonlinearity={args.get('nonlinearity')}")
+        except OSError:
+            pass
 
     # Create a temporary environment to get the output size
     temp_env = make_silent_env(
@@ -371,8 +374,11 @@ def run_task_local(args, run_id):
 
         plot_data.append([float(gen + 1), float(best_val), float(avg_val)])
 
-        if verbosity >= 1:
-            print(f"[Run {int(run_id):02d}] [GEN {int(gen + 1):04d}] [BEST {best_val:.2f}] [AVG {avg_val:.2f}]")
+        if verbosity >= 1 and (gen + 1) % 10 == 0:
+            try:
+                print(f"[Run {int(run_id):02d}] [GEN {int(gen + 1):04d}] [BEST {best_val:.2f}] [AVG {avg_val:.2f}]")
+            except OSError:
+                pass
 
     return {
         "run_id": int(run_id),

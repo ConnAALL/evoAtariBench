@@ -284,7 +284,7 @@ def main():
     for i, args_dict in enumerate(tasks, start=1):
         cores = int(args_dict.get("CORES_PER_TASK", 1))
         logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
-        ray_tasks.append(run_task_remote.options(num_cpus=cores).remote(args_dict, run_id=i))
+        ray_tasks.append(run_task_remote.options(max_retries=3, retry_exceptions=True, num_cpus=cores).remote(args_dict, run_id=i))
 
     remaining = set(ray_tasks)  # Set of the remaining tasks to be completed
     while remaining:  # While there are remaining tasks to be completed
@@ -294,7 +294,7 @@ def main():
             result = ray.get(finished_ref)
         except Exception as e:
             logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
-            raise
+            continue
 
         rid = int(result["run_id"])
         env_name = str(result["env_name"])

@@ -1,12 +1,11 @@
 """
-Simple script for the visualization of the DCT compression with, sparsification, quantization, and dropout.
+Simple script for the visualization of the conv compression with, sparsification, quantization, and dropout.
 """
 import os
 import sys
 import argparse
 import numpy as np
 from PIL import Image
-import cv2
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:

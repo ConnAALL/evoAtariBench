@@ -33,6 +33,19 @@ def _slug(s):
     return s.strip("_") or "unknown"
 
 
+def _repo_root():
+    """
+    This script lives in data/plotting_scripts/, so repo root is 3 levels up.
+    (Fallback included in case the file is moved elsewhere.)
+    """
+    here = os.path.abspath(__file__)
+    d = os.path.dirname(here)  # .../data/plotting_scripts
+    d_data = os.path.dirname(d)  # .../data
+    if os.path.basename(d_data) == "data":
+        return os.path.dirname(d_data)  # .../repo
+    return os.path.dirname(os.path.dirname(here))
+
+
 def _task_signature(task):
     keep_keys = [
         "ENV_NAME",
@@ -248,7 +261,7 @@ def _plot_game_compare_compression(
 
 
 def main():
-    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    repo_root = _repo_root()
     db_path = os.path.abspath(os.path.join(repo_root, "data", "evo_train_runs.db"))
     out_dir = os.path.abspath(os.path.join(repo_root, "plots", "evo_train_runs"))
     metric = "avg"

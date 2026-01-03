@@ -174,34 +174,24 @@ def dropout_regularization(x: np.ndarray, args: dict) -> np.ndarray:
     return np.where(mask, x / keep_prob, 0.0).astype(np.float32, copy=False)
 
 def dropout_regularization_complex(x: np.ndarray, args: dict) -> np.ndarray:
-    """
-    Apply dropout regularization to a complex-valued array by
-    calling the existing real-valued dropout function on the magnitude,
-    then applying the same mask to both real and imaginary parts.
-
-    Parameters:
-        x    : complex ndarray
-        args : dict containing 'rate'
-
-    Returns:
-        Complex ndarray with dropout applied
-    """
     if not np.iscomplexobj(x):
         raise ValueError("Input must be a complex-valued array")
 
     rate = args.get("rate", None)
     if rate is None:
         raise ValueError("rate must be provided for dropout regularization")
+    if not (0.0 <= rate < 1.0):
+        raise ValueError("rate must be in [0.0, 1.0)")
 
-    # Use existing dropout on magnitude to generate a mask
-    mag = np.abs(x)
-    mag_dropped = dropout_regularization(mag, args)
+    x = np.asarray(x, dtype=np.complex64)
 
-    # Dropout mask: kept entries are non-zero
-    mask = mag_dropped != 0.0
+    if rate == 0.0:
+        return x
 
-    # IMPORTANT: rescale complex values to preserve expectation
     keep_prob = 1.0 - rate
+    rng = np.random.default_rng()
+    mask = rng.random(size=x.shape) < keep_prob
+
     return np.where(mask, x / keep_prob, 0.0).astype(np.complex64, copy=False)
 
 def get_nonlinearity_method(method_name):

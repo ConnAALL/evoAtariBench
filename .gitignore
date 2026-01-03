@@ -3,6 +3,5 @@ logs
 temp
 .DS_Store
 __pycache__
-**/*.db*
 **/*.npy
 plots/

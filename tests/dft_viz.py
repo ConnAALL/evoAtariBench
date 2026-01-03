@@ -1,6 +1,5 @@
 """
 Simple script for the visualization of the DFT compression with sparsification, quantization, and dropout.
-Mirrors `tests/dct_viz.py`, but uses a centered crop in the frequency domain and inverse via `inv.idft_k`.
 """
 
 import os
@@ -17,21 +16,8 @@ import methods.compressionMethods as cm
 import methods.invCompressionMethods as inv
 import methods.nonLinearMethods as nm
 
-def to_grayscale(img_arr: np.ndarray) -> np.ndarray:
-    x = np.asarray(img_arr)
-    if x.dtype != np.float32:
-        x = x.astype(np.float32, copy=False)
-    if x.max() > 1.0:
-        x = x / 255.0
-    g = cm.convert_to_grayscale(x)
-    return np.clip(g, 0.0, 1.0).astype(np.float32, copy=False)
-
-
-def save_img(path: str, arr: np.ndarray):
-    arr = np.asarray(arr, dtype=np.float32)
-    arr = np.clip(arr, 0.0, 1.0)
-    u8 = (arr * 255.0).round().astype(np.uint8)
-    Image.fromarray(u8, mode="L").save(path)
+from methods.compressionMethods import convert_to_grayscale
+from dct_viz import save_img
 
 
 def main():
@@ -40,10 +26,10 @@ def main():
     parser.add_argument("--outdir", default=os.path.join(_REPO_ROOT, "out", "dft_viz"), help="Output directory.")
     parser.add_argument("--resize_h", type=int, default=210, help="Resize height (default: 210). Set 0/negative to disable.")
     parser.add_argument("--resize_w", type=int, default=160, help="Resize width (default: 160). Set 0/negative to disable.")
-    parser.add_argument("--k", type=int, default=160, help="DFT crop size k (center crop)")
-    parser.add_argument("--percentile", type=float, default=41, help="Sparsification percentile (on |coeff|).")
-    parser.add_argument("--num_levels", type=int, default=5, help="Quantization num_levels (applied to real+imag).")
-    parser.add_argument("--dropout_rate", type=float, default=0.086, help="Dropout rate.")
+    parser.add_argument("--k", type=int, default=142, help="DFT crop size k (center crop)")
+    parser.add_argument("--percentile", type=float, default=86, help="Sparsification percentile (on |coeff|).")
+    parser.add_argument("--num_levels", type=int, default=136, help="Quantization num_levels (applied to real+imag).")
+    parser.add_argument("--dropout_rate", type=float, default=0.20, help="Dropout rate.")
     args = parser.parse_args()
 
     os.makedirs(args.outdir, exist_ok=True)
@@ -56,17 +42,17 @@ def main():
         img = img.resize((int(args.resize_w), int(args.resize_h)), resample=Image.BILINEAR)
 
     arr = np.array(img, dtype=np.float32) / 255.0
-    gray = to_grayscale(arr)
+    gray = convert_to_grayscale(arr)
     H, W = gray.shape
 
     k = int(args.k)
     k = max(1, min(k, H, W))
 
-    block_c = cm.dft_k(gray, {"k": k, "norm": "ortho"})
+    dft_compressed = cm.dft_k(gray, {"k": k, "norm": "ortho"})
 
-    sparsified = nm.sparsification_complex(block_c, {"percentile": float(args.percentile)})
-    quantized = nm.quantization_complex(block_c, {"num_levels": int(args.num_levels)})
-    dropped = nm.dropout_regularization_complex(block_c, {"rate": float(args.dropout_rate)})
+    sparsified = nm.sparsification_complex(dft_compressed, {"percentile": float(args.percentile)})
+    quantized = nm.quantization_complex(dft_compressed, {"num_levels": int(args.num_levels)})
+    dropped = nm.dropout_regularization_complex(dft_compressed, {"rate": float(args.dropout_rate)})
 
     reconstruct_sparsification = np.clip(inv.idft_k(sparsified, (H, W), output="real", norm="ortho"), 0.0, 1.0)
     reconstructed_quantization = np.clip(inv.idft_k(quantized.astype(np.complex64, copy=False), (H, W), output="real", norm="ortho"), 0.0, 1.0)

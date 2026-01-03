@@ -62,10 +62,13 @@ def dft_k(x, args):
     return low_freq.astype(np.complex64, copy=False)
 
 
-def conv2d(x, kernel, mode="same", boundary="symm", fillvalue=0.0):
+def conv2d(x, kernel=None, mode="same", boundary="symm", fillvalue=0.0):
     """Apply 2-D Convolution to x with a given kernel"""
     x = convert_to_grayscale(x).astype(np.float32, copy=False)
-    k = np.asarray(kernel, dtype=np.float32)
+    if kernel is None:
+        k = np.full((3, 3), 1.0 / 9.0, dtype=np.float32)
+    else:
+        k = np.asarray(kernel, dtype=np.float32)
     return _convolve2d(x, k, mode=mode, boundary=boundary, fillvalue=fillvalue).astype(np.float32)
 
 

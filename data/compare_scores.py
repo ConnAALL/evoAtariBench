@@ -135,7 +135,7 @@ def _parse_args():
         "--save-csv",
         dest="save_csv",
         action="store_true",
-        help="Save the printed table (after filtering + summary rows) to compare_scores_out.csv.",
+        help="Save the printed table (after filtering + summary rows) to data/baselines/compare_scores_out.csv.",
     )
     p.add_argument(
         "--include-human",
@@ -427,7 +427,7 @@ def _print_pairwise_matrix_fallback(method_cols, counts):
 def main():
     args = _parse_args()
     here = os.path.dirname(os.path.abspath(__file__))
-    csv_path = os.path.join(here, "atari_scores.csv")
+    csv_path = os.path.join(here, "baselines", "atari_scores.csv")
     db_path = os.path.join(here, "evo_train_runs.db")
 
     fieldnames, rows = _load_rows(csv_path)
@@ -467,7 +467,7 @@ def main():
     _fill_empty_with_na(rows, headers)
 
     if args.save_csv:
-        out_path = os.path.join(here, "compare_scores_out.csv")
+        out_path = os.path.join(here, "baselines", "compare_scores_out.csv")
         _save_csv(headers, rows, out_path)
         print(f"[saved] {out_path}")
 

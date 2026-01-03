@@ -99,8 +99,8 @@ def _task_params_one_line(args_dict: dict) -> str:
 
 
 def _load_all_env_names(repo_root: str) -> list[str]:
-    """Load all Atari environment names from data/atari_game_infos.csv"""
-    csv_path = os.path.join(repo_root, "data", "atari_game_infos.csv")
+    """Load all Atari environment names from data/baselines/atari_game_infos.csv"""
+    csv_path = os.path.join(repo_root, "data", "baselines", "atari_game_infos.csv")
     envs: list[str] = []
     with open(csv_path, "r", encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
@@ -220,7 +220,7 @@ def get_args():
     parser = argparse.ArgumentParser(description="Dispatch EvoAtariBench training tasks to a Ray cluster.")
     parser.add_argument("--dry-run", action="store_true", help="Print the expanded task list (preview) and exit without running Ray.")
     parser.add_argument("--no-save", action="store_true", help="Do not write results to SQLite; only print progress.")
-    parser.add_argument("--all-games", action="store_true", help="Sweep through every environment listed in data/atari_game_infos.csv.")
+    parser.add_argument("--all-games", action="store_true", help="Sweep through every environment listed in data/baselines/atari_game_infos.csv.")
     parser.add_argument("--db-name", default="evo_train_runs.db", help="SQLite DB filename to write under data/ (or pass a full path). Default: evo_train_runs.db")
     return parser.parse_args()
 
@@ -239,7 +239,7 @@ def main():
         all_envs = _load_all_env_names(repo_root)
         global ENV_SWEEP
         ENV_SWEEP = [{"ENV_NAME": all_envs}]
-        logger.info(f"[All Games] Loaded {len(all_envs)} environments from data/atari_game_infos.csv")
+        logger.info(f"[All Games] Loaded {len(all_envs)} environments from data/baselines/atari_game_infos.csv")
 
     tasks = build_tasks()  # Build the tasks from the config dictionaries
     repeats = int(DEFAULT_ARGS.get("REPEATS_PER_CONFIG", 1))  # Repeat each config N times

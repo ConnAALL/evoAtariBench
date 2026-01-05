@@ -268,13 +268,18 @@ def main():
         runtime_env={
             "working_dir": repo_root,  # The working directory of the ray cluster
             "excludes": [  # Remove all the extra folders
-                "data/**",
                 "temp/**",
-                "__pycache__/**",
+                "data/**",
+                "out/**",
+                "parameter_tests/**",
+                "result_plotting_and_analysis/**",
                 "tests/**",
+                "__pycache__/**",
                 ".gitignore",
+                ".git/**",
                 "environment.yml",
                 "requirements.txt",
+                "notes.txt",
                 "test_image.jpg",
             ],
         },

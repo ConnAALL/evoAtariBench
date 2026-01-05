@@ -2,10 +2,21 @@ import argparse
 import csv
 import os
 import sqlite3
-from rich.console import Console
-from rich.table import Table
-from rich.text import Text
-import tabulate
+import re
+
+try:
+    from rich.console import Console
+    from rich.table import Table
+    from rich.text import Text
+except Exception:
+    Console = None
+    Table = None
+    Text = None
+
+try:
+    import tabulate
+except Exception:
+    tabulate = None
 
 EXCLUDE_COLS = {"action_space", "obs_rows", "obs_cols"}
 
@@ -19,17 +30,13 @@ def _load_rows(csv_path):
 
 
 def _select_columns(fieldnames, include_human=False):
-    wanted_first = ["game", "SCOPE", "rank", "openai-es"]
+    wanted_first = ["game", "environment"]
     cols = []
     for c in wanted_first:
         if c in fieldnames and c not in EXCLUDE_COLS and c not in cols:
             cols.append(c)
     for c in fieldnames:
-        if c == "ale_env":
-            continue
         if c == "human" and not include_human:
-            continue
-        if c == "hyperneat":
             continue
         if c in EXCLUDE_COLS:
             continue
@@ -39,7 +46,7 @@ def _select_columns(fieldnames, include_human=False):
     return cols
 
 
-def _load_scope_scores(db_path):
+def _load_best_scores(db_path):
     if not os.path.exists(db_path):
         return {}
     con = sqlite3.connect(db_path, timeout=30.0)
@@ -56,7 +63,7 @@ def _load_scope_scores(db_path):
         con.close()
 
 
-def _fmt_scope(x):
+def _fmt_score(x):
     if x is None:
         return "NA"
     try:
@@ -124,6 +131,26 @@ def _fill_empty_with_na(rows, headers):
 def _parse_args():
     p = argparse.ArgumentParser()
     p.add_argument(
+        "--comp",
+        dest="comp",
+        required=True,
+        choices=["dct"],
+        help="Compressor to compare. Currently supported: dct",
+    )
+    p.add_argument(
+        "--run-dir",
+        dest="run_dir",
+        default=None,
+        help="Directory containing per-method sqlite DBs for the selected compressor. "
+        "Defaults to data/run_data/<comp>_game_sweep.",
+    )
+    p.add_argument(
+        "--base-csv",
+        dest="base_csv",
+        default=None,
+        help="Base benchmark CSV to use as the starting table. Defaults to data/previous_benchmark_scores/subset_results.csv.",
+    )
+    p.add_argument(
         "--filter",
         "--require-baselines",
         dest="require_baselines",
@@ -182,10 +209,10 @@ def _scope_rank(scope_v, row, method_cols):
             return i + 1
     return None
 
-def _times_rank_summaries(rows, headers, max_rank=3):
-    baseline_cols = [h for h in headers if h not in ("game", "SCOPE", "rank")]
-    method_cols = ["SCOPE"] + baseline_cols
+def _method_cols_from_headers(headers):
+    return [h for h in headers if h not in ("game", "environment")]
 
+def _times_rank_summaries(rows, method_cols, max_rank=3):
     counts_by_rank = {k: {c: 0 for c in method_cols} for k in range(1, int(max_rank) + 1)}
 
     for r in rows:
@@ -213,7 +240,6 @@ def _times_rank_summaries(rows, headers, max_rank=3):
         out = {
             "__summary__": True,
             "game": f"Times {rank}st" if rank == 1 else (f"Times {rank}nd" if rank == 2 else f"Times {rank}rd"),
-            "rank": "",
         }
         for c in method_cols:
             out[c] = str(int(counts_by_rank[rank][c]))
@@ -221,9 +247,7 @@ def _times_rank_summaries(rows, headers, max_rank=3):
     return out_rows
 
 
-def _result_reported_summary(rows, headers):
-    baseline_cols = [h for h in headers if h not in ("game", "SCOPE", "rank")]
-    method_cols = ["SCOPE"] + baseline_cols
+def _result_reported_summary(rows, method_cols):
     counts = {c: 0 for c in method_cols}
 
     for r in rows:
@@ -233,10 +257,18 @@ def _result_reported_summary(rows, headers):
             if _to_float(r.get(c)) is not None:
                 counts[c] += 1
 
-    out = {"__summary__": True, "game": "Result Reported", "rank": "NA"}
+    out = {"__summary__": True, "game": "Result Reported"}
     for c in method_cols:
         out[c] = str(int(counts[c]))
     return out
+
+def _best_cols_for_row(row, method_cols):
+    vals = {c: _to_float(row.get(c)) for c in method_cols}
+    present = {c: v for c, v in vals.items() if v is not None}
+    if not present:
+        return set()
+    best = max(present.values())
+    return {c for c, v in present.items() if abs(float(v) - float(best)) < 1e-9}
 
 
 def _print_rich(headers, rows):
@@ -250,22 +282,16 @@ def _print_rich(headers, rows):
         if _is_summary_row(r):
             table.add_row(*[str(r.get(h, "")) for h in headers])
             continue
-        scope_v = _to_float(r.get("SCOPE"))
-        scope_color = _scope_color_from_rank(_to_float(r.get("rank")))
+        method_cols = _method_cols_from_headers(headers)
+        best_cols = _best_cols_for_row(r, method_cols)
         cells = []
         for h in headers:
             v = r.get(h, "")
             s = str(v)
-            if h == "SCOPE" and scope_color:
-                style = "orange1" if scope_color == "orange" else scope_color
-                cells.append(Text(s, style=style))
-                continue
-            if h not in ("game", "SCOPE", "rank"):
-                style = _style_for_score(v, scope_v)
-                if style:
-                    cells.append(Text(s, style=style))
-                    continue
-            cells.append(s)
+            if h in best_cols:
+                cells.append(Text(s, style="green"))
+            else:
+                cells.append(s)
         table.add_row(*cells)
 
     Console().print(table)
@@ -281,17 +307,14 @@ def _print_tabulate(headers, rows):
         if _is_summary_row(r):
             body.append([str(r.get(h, "")) for h in headers])
             continue
-        scope_v = _to_float(r.get("SCOPE"))
-        scope_color = _scope_color_from_rank(_to_float(r.get("rank")))
+        method_cols = _method_cols_from_headers(headers)
+        best_cols = _best_cols_for_row(r, method_cols)
         row = []
         for h in headers:
             v = r.get(h, "")
             s = str(v)
-            if h == "SCOPE" and scope_color:
-                s = _ansi_colorize(s, scope_color)
-            elif h not in ("game", "SCOPE", "rank"):
-                style = _style_for_score(v, scope_v)
-                s = _ansi_colorize(s, style)
+            if h in best_cols:
+                s = _ansi_colorize(s, "green")
             row.append(s)
         body.append(row)
     print(tabulate(body, headers=headers, tablefmt="github"))
@@ -304,17 +327,14 @@ def _print_fallback(headers, rows):
         if _is_summary_row(r):
             body.append([str(r.get(h, "")) for h in headers])
             continue
-        scope_v = _to_float(r.get("SCOPE"))
-        scope_color = _scope_color_from_rank(_to_float(r.get("rank")))
+        method_cols = _method_cols_from_headers(headers)
+        best_cols = _best_cols_for_row(r, method_cols)
         row = []
         for h in headers:
             v = r.get(h, "")
             s = str(v)
-            if h == "SCOPE" and scope_color:
-                s = _ansi_colorize(s, scope_color)
-            elif h not in ("game", "SCOPE", "rank"):
-                style = _style_for_score(v, scope_v)
-                s = _ansi_colorize(s, style)
+            if h in best_cols:
+                s = _ansi_colorize(s, "green")
             row.append(s)
         body.append(row)
     widths = [len(h) for h in headers]
@@ -338,11 +358,6 @@ def _save_csv(headers, rows, out_path):
         for r in rows:
             out = {h: _normalize_cell(r.get(h, "NA")) for h in headers}
             w.writerow(out)
-
-
-def _method_cols_from_headers(headers):
-    baseline_cols = [h for h in headers if h not in ("game", "SCOPE", "rank")]
-    return ["SCOPE"] + baseline_cols
 
 
 def _pairwise_beats_counts(rows, method_cols):
@@ -423,31 +438,74 @@ def _print_pairwise_matrix_fallback(method_cols, counts):
     for row in body:
         print(fmt(row))
 
+def _safe_slug(s):
+    s = str(s).strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "method"
+
+def _dct_method_from_db_filename(filename):
+    # Examples:
+    # - dct_dropout_250gen.db -> dropout
+    # - dct_quantization_250gen.db -> quantization
+    base = os.path.basename(filename)
+    if base.lower().endswith(".db"):
+        base = base[:-3]
+    if base.lower().startswith("dct_"):
+        base = base[4:]
+    base = re.sub(r"_\d+gen$", "", base, flags=re.IGNORECASE)
+    base = re.sub(r"_gen$", "", base, flags=re.IGNORECASE)
+    return _safe_slug(base)
+
 
 def main():
     args = _parse_args()
     here = os.path.dirname(os.path.abspath(__file__))
-    csv_path = os.path.join(here, "baselines", "atari_scores.csv")
-    db_path = os.path.join(here, "evo_train_runs.db")
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 
-    fieldnames, rows = _load_rows(csv_path)
-    scope_by_env = _load_scope_scores(db_path)
+    base_csv_path = (
+        os.path.abspath(args.base_csv)
+        if args.base_csv
+        else os.path.join(repo_root, "data", "previous_benchmark_scores", "subset_results.csv")
+    )
+    fieldnames, rows = _load_rows(base_csv_path)
 
-    for r in rows:
-        env = r.get("ale_env", "")
-        r["SCOPE"] = _fmt_scope(scope_by_env.get(env))
+    # Remember which columns are "baseline" from the base CSV so filters can ignore added columns.
+    baseline_cols = [h for h in fieldnames if h not in ("game", "environment")]
 
-    headers = _select_columns(list(fieldnames) + ["SCOPE", "rank"], include_human=bool(args.include_human))
+    added_method_cols = []
+    if args.comp == "dct":
+        run_dir = (
+            os.path.abspath(args.run_dir)
+            if args.run_dir
+            else os.path.join(repo_root, "data", "run_data", "dct_game_sweep")
+        )
+        if not os.path.isdir(run_dir):
+            raise SystemExit(f"--run-dir not found or not a directory: {run_dir}")
 
-    baseline_cols_for_rank = [h for h in headers if h not in ("game", "SCOPE", "rank")]
-    method_cols_for_rank = ["SCOPE"] + baseline_cols_for_rank
-    for r in rows:
-        scope_v = _to_float(r.get("SCOPE"))
-        rk = _scope_rank(scope_v, r, method_cols_for_rank)
-        r["rank"] = "NA" if rk is None else str(int(rk))
+        db_paths = sorted(
+            [
+                os.path.join(run_dir, fn)
+                for fn in os.listdir(run_dir)
+                if fn.lower().endswith(".db")
+            ]
+        )
+        if not db_paths:
+            raise SystemExit(f"No .db files found in: {run_dir}")
+
+        scores_by_method = {}
+        for db_path in db_paths:
+            method = _dct_method_from_db_filename(db_path)
+            col = f"dct_{method}"
+            scores_by_method[col] = _load_best_scores(db_path)
+            added_method_cols.append(col)
+
+        for r in rows:
+            env = r.get("environment", "")
+            for col, by_env in scores_by_method.items():
+                r[col] = _fmt_score(by_env.get(env))
 
     if args.require_baselines is not None:
-        baseline_cols = [h for h in headers if h not in ("game", "SCOPE", "rank")]
         req = int(args.require_baselines)
         if req < 0:
             req = 0
@@ -461,8 +519,11 @@ def main():
 
         rows = [r for r in rows if ok(r)]
 
-    rows.extend(_times_rank_summaries(rows, headers, max_rank=3))
-    rows.append(_result_reported_summary(rows, headers))
+    headers = _select_columns(list(fieldnames) + added_method_cols, include_human=bool(args.include_human))
+    method_cols = _method_cols_from_headers(headers)
+
+    rows.extend(_times_rank_summaries(rows, method_cols, max_rank=3))
+    rows.append(_result_reported_summary(rows, method_cols))
 
     _fill_empty_with_na(rows, headers)
 
@@ -477,7 +538,6 @@ def main():
     if not printed:
         _print_fallback(headers, rows)
 
-    method_cols = _method_cols_from_headers(headers)
     counts = _pairwise_beats_counts(rows, method_cols)
     printed_matrix = _print_pairwise_matrix_rich(method_cols, counts)
     if not printed_matrix:

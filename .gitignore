@@ -1,7 +1,7 @@
 out
-logs
 temp
 .DS_Store
 __pycache__
-**/*.npy
 plots/
+*.db
+*.log

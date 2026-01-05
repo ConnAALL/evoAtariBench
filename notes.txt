@@ -1,0 +1,1 @@
+jan 5 2025 - training on a subset of games in order to have more trials and greater stats accuracy. Idea from The Arcade Learning Environment: An Evaluation Platform for General Agents. We are choosing hyperparameters via this method.

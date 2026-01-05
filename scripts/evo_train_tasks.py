@@ -34,6 +34,10 @@ RAY_HEAD = f"{RAY_HEAD_IP}:{RAY_HEAD_PORT}"
 # List of Atari games to sweep through.
 ENV_SWEEP = [
     {"ENV_NAME": [
+        "ALE/Asterix-v5",
+        "ALE/BeamRider-v5",
+        "ALE/Freeway-v5",
+        "ALE/Seaquest-v5",
         "ALE/SpaceInvaders-v5",
     ]},
 ]

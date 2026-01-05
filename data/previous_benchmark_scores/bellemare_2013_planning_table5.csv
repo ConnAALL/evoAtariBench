@@ -1,0 +1,56 @@
+Game,environment,Full Tree,UCT,Best Learner,Best Baseline
+Asterix,ALE/Asterix-v5,2135.7,290700.0,987.3,650.0
+Beam Rider,ALE/BeamRider-v5,693.5,6624.6,929.4,996.0
+Freeway,ALE/Freeway-v5,0.0,0.4,19.1,22.5
+Seaquest,ALE/Seaquest-v5,288.0,5132.4,664.8,451.1
+Space Invaders,ALE/SpaceInvaders-v5,112.2,2718.0,250.1,270.5
+Alien,ALE/Alien-v5,784.0,7785.0,939.2,313.9
+Amidar,ALE/Amidar-v5,5.2,180.3,103.4,37.8
+Assault,ALE/Assault-v5,413.7,1512.2,628.0,497.8
+Asteroids,ALE/Asteroids-v5,3127.4,4660.6,907.3,1526.7
+Atlantis,ALE/Atlantis-v5,30460.0,193858.0,62687.0,33058.4
+Bank Heist,ALE/BankHeist-v5,21.5,497.8,190.8,15.0
+Battle Zone,ALE/BattleZone-v5,6312.5,70333.3,15819.7,13000.0
+Berzerk,ALE/Berzerk-v5,195.0,553.5,501.3,670.0
+Bowling,ALE/Bowling-v5,25.5,25.1,43.9,30.0
+Boxing,ALE/Boxing-v5,100.0,100.0,44.0,-1.5
+Breakout,ALE/Breakout-v5,1.1,364.4,5.2,3.0
+Carnival,ALE/Carnival-v5,950.0,5132.0,2323.9,869.2
+Centipede,ALE/Centipede-v5,125123.0,110422.0,8803.8,16527.0
+Chopper Command,ALE/ChopperCommand-v5,1827.3,34018.8,1581.5,1000.0
+Crazy Climber,ALE/CrazyClimber-v5,37110.0,98172.2,23410.6,2335.4
+Demon Attack,ALE/DemonAttack-v5,442.6,28158.8,520.5,776.2
+Double Dunk,ALE/DoubleDunk-v5,-18.5,24.0,-13.1,0.0
+Elevator Action,ALE/ElevatorAction-v5,730.0,18100.0,3220.6,1040.9
+Enduro,ALE/Enduro-v5,0.6,286.3,129.1,25.9
+Fishing Derby,ALE/FishingDerby-v5,-91.6,37.8,-89.5,-93.8
+Frostbite,ALE/Frostbite-v5,137.2,270.5,216.9,175.2
+Gopher,ALE/Gopher-v5,1019.0,20560.0,1288.3,286.8
+Gravitar,ALE/Gravitar-v5,395.0,2850.0,387.7,205.4
+H.E.R.O.,ALE/Hero-v5,1323.8,12859.5,6458.8,712.0
+Ice Hockey,ALE/IceHockey-v5,-9.2,39.4,-9.5,-1.0
+James Bond,ALE/Jamesbond-v5,25.0,330.0,202.8,82.0
+Journey Escape,ALE/JourneyEscape-v5,1327.3,7683.3,-8441.0,0.0
+Kangaroo,ALE/Kangaroo-v5,90.0,1990.0,1622.1,498.4
+Krull,ALE/Krull-v5,3089.2,5037.0,3371.5,1880.1
+Kung-Fu Master,ALE/KungFuMaster-v5,12127.3,48854.5,19544.0,578.4
+Montezuma's Revenge,ALE/MontezumaRevenge-v5,0.0,0.0,10.7,0.3
+Ms. Pacman,ALE/MsPacman-v5,1708.5,22336.0,1691.8,505.5
+Name This Game,ALE/NameThisGame-v5,5699.0,15410.0,2500.1,3080.0
+Pooyan,ALE/Pooyan-v5,909.7,17763.4,1225.3,540.8
+Pong,ALE/Pong-v5,-20.7,21.0,-19.0,-20.8
+Private Eye,ALE/PrivateEye-v5,57.9,100.0,684.3,1947.3
+Q*Bert,ALE/Qbert-v5,132.8,17343.4,613.5,169.0
+River Raid,ALE/Riverraid-v5,2178.5,4449.0,1904.3,1608.6
+Road Runner,ALE/RoadRunner-v5,245.0,38725.0,67.7,900.0
+Robotank,ALE/Robotank-v5,1.5,50.4,28.7,17.0
+Skiing,ALE/Skiing-v5,0.0,-0.8,0.0,0.0
+Star Gunner,ALE/StarGunner-v5,1345.0,1207.1,1069.5,638.1
+Tennis,ALE/Tennis-v5,-23.8,2.8,-0.1,0.0
+Time Pilot,ALE/TimePilot-v5,4063.6,63854.5,3741.2,3458.8
+Tutankham,ALE/Tutankham-v5,64.1,225.5,114.3,23.1
+Up and Down,ALE/UpNDown-v5,746.0,74473.6,3532.7,2962.9
+Venture,ALE/Venture-v5,0.0,0.0,66.0,0.0
+Video Pinball,ALE/VideoPinball-v5,55567.3,254748.0,16871.3,20021.1
+Wizard of Wor,ALE/WizardOfWor-v5,3309.1,105500.0,1981.3,772.4
+Zaxxon,ALE/Zaxxon-v5,0.0,22610.0,3365.1,2.0

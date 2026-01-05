@@ -5,9 +5,6 @@ Currently supported methods:
 - Discrete Cosine Transform
 - Discrete Fourier Transform
 - Wavelet Transform
-- Convolutional Neural Network
-- Gaussian Filter
-- Autoencoder
 """
 
 import pywt

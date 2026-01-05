@@ -1,0 +1,50 @@
+Game,environment,Random,Human,DQN,Double DQN
+Alien,ALE/Alien-v5,227.80,6875.40,3069.33,2907.30
+Amidar,ALE/Amidar-v5,5.80,1675.80,739.50,702.10
+Assault,ALE/Assault-v5,222.40,1496.40,3358.63,5022.90
+Asterix,ALE/Asterix-v5,210.00,8503.30,6011.67,15150.00
+Asteroids,ALE/Asteroids-v5,719.10,13156.70,1629.33,930.60
+Atlantis,ALE/Atlantis-v5,12850.00,29028.10,85950.00,64758.00
+Bank Heist,ALE/BankHeist-v5,14.20,734.40,429.67,728.30
+Battle Zone,ALE/BattleZone-v5,2360.00,37800.00,26300.00,25730.00
+Beam Rider,ALE/BeamRider-v5,363.90,5774.70,6845.93,7654.00
+Bowling,ALE/Bowling-v5,23.10,154.80,42.40,70.50
+Boxing,ALE/Boxing-v5,0.10,4.30,71.83,81.70
+Breakout,ALE/Breakout-v5,1.70,31.80,401.20,375.00
+Centipede,ALE/Centipede-v5,2090.90,11963.20,8309.40,4139.40
+Chopper Command,ALE/ChopperCommand-v5,811.00,9881.80,6686.67,4653.00
+Crazy Climber,ALE/CrazyClimber-v5,10780.50,35410.50,114103.33,101874.00
+Demon Attack,ALE/DemonAttack-v5,152.10,3401.30,9711.17,9711.90
+Double Dunk,ALE/DoubleDunk-v5,-18.60,-15.50,-18.07,-6.30
+Enduro,ALE/Enduro-v5,0.00,309.60,301.77,319.50
+Fishing Derby,ALE/FishingDerby-v5,-91.70,5.50,-0.80,20.30
+Freeway,ALE/Freeway-v5,0.00,29.60,30.30,31.80
+Frostbite,ALE/Frostbite-v5,65.20,4334.70,328.33,241.50
+Gopher,ALE/Gopher-v5,257.60,2321.00,8520.00,8215.40
+Gravitar,ALE/Gravitar-v5,173.00,2672.00,306.67,170.50
+H.E.R.O.,ALE/Hero-v5,1027.00,25762.50,19950.33,20357.00
+Ice Hockey,ALE/IceHockey-v5,-11.20,0.90,-1.60,-2.40
+James Bond,ALE/Jamesbond-v5,29.00,406.70,576.67,438.00
+Kangaroo,ALE/Kangaroo-v5,52.00,3035.00,6740.00,13651.00
+Krull,ALE/Krull-v5,1598.00,2394.60,3804.67,4396.70
+Kung-Fu Master,ALE/KungFuMaster-v5,258.50,22736.20,23270.00,29486.00
+Montezuma's Revenge,ALE/MontezumaRevenge-v5,0.00,4366.70,0.00,0.00
+Ms. Pacman,ALE/MsPacman-v5,307.30,15693.40,2311.00,3210.00
+Name This Game,ALE/NameThisGame-v5,2292.30,4076.20,7256.67,6997.10
+Pong,ALE/Pong-v5,-20.70,9.30,18.90,21.00
+Private Eye,ALE/PrivateEye-v5,24.90,69571.30,1787.57,670.10
+Q*Bert,ALE/Qbert-v5,163.90,13455.00,10595.83,14875.00
+River Raid,ALE/Riverraid-v5,1338.50,13513.30,8315.67,12015.30
+Road Runner,ALE/RoadRunner-v5,11.50,7845.00,18256.67,48377.00
+Robotank,ALE/Robotank-v5,2.20,11.90,51.57,46.70
+Seaquest,ALE/Seaquest-v5,68.40,20181.80,5286.00,7995.00
+Space Invaders,ALE/SpaceInvaders-v5,148.00,1652.30,1975.50,3154.60
+Star Gunner,ALE/StarGunner-v5,664.00,10250.00,57996.67,65188.00
+Tennis,ALE/Tennis-v5,-23.80,-8.90,-2.47,1.70
+Time Pilot,ALE/TimePilot-v5,3568.00,5925.00,5946.67,7964.00
+Tutankham,ALE/Tutankham-v5,11.40,167.60,186.70,190.60
+Up and Down,ALE/UpNDown-v5,533.40,9082.00,8456.33,16769.90
+Venture,ALE/Venture-v5,0.00,1187.50,380.00,93.00
+Video Pinball,ALE/VideoPinball-v5,16256.90,17297.60,42684.07,70009.00
+Wizard of Wor,ALE/WizardOfWor-v5,563.50,4756.50,3393.33,5204.00
+Zaxxon,ALE/Zaxxon-v5,32.50,9173.30,4976.67,10182.00

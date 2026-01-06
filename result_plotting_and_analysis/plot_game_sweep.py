@@ -8,6 +8,11 @@ For a fixed compression method (--comp), this script:
 
 Each per-game subplot overlays the mean curves for all methods (different colors).
 
+Also supported: --run-dir may point directly to a single SQLite .db file that contains
+multiple methods encoded inside `runs.task_json` (e.g. `task_json["nonlinearity"]`).
+In that case this script will infer the method label from `task_json` and overlay those
+methods within that single DB.
+
 Example:
   python3 result_plotting_and_analysis/plot_game_sweep.py --comp dct
 """
@@ -23,9 +28,12 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from typing import Any, Iterable
-
+import scienceplots
 import numpy as np
 
+import matplotlib.pyplot as plt
+
+plt.style.use(["science", "no-latex"])
 
 def _repo_root() -> str:
     """
@@ -46,6 +54,44 @@ def _safe_slug(s: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "_", s)
     s = re.sub(r"_+", "_", s).strip("_")
     return s or "method"
+
+
+def _infer_method_from_task(task: dict[str, Any]) -> str | None:
+    """
+    Try to infer a "method" label from the run's task dict.
+
+    This supports single-DB results where multiple methods are stored in one DB and the
+    distinguishing label lives inside `task_json` (e.g. `task_json["nonlinearity"]`).
+    """
+    if not isinstance(task, dict) or not task:
+        return None
+
+    # Prefer commonly-used keys first.
+    preferred_keys = [
+        "nonlinearity",
+        "NONLINEARITY",
+        "nonlinearity_method",
+        "NONLINEARITY_METHOD",
+        "method",
+        "METHOD",
+        "activation",
+        "ACTIVATION",
+    ]
+
+    for k in preferred_keys:
+        if k in task:
+            v = task.get(k)
+            if isinstance(v, (str, int, float, bool)):
+                return _safe_slug(v)
+
+    # Fallback: any key that *looks like* it describes a method.
+    for k, v in task.items():
+        kl = str(k).lower()
+        if "method" in kl or "nonlin" in kl or "activation" in kl:
+            if isinstance(v, (str, int, float, bool)):
+                return _safe_slug(v)
+
+    return None
 
 
 def _method_from_db_filename(comp: str, filename: str) -> str:
@@ -169,19 +215,28 @@ def _default_out_dir(comp: str) -> str:
     return os.path.join(_repo_root(), "out", "plots", "game_sweep", comp)
 
 
-def _find_db_paths(run_dir: str, comp: str) -> list[str]:
+def _find_db_paths(run_path: str, comp: str) -> list[str]:
     comp_l = str(comp).lower()
+    run_path = os.path.abspath(run_path)
+
+    # Allow passing a single .db file directly.
+    if os.path.isfile(run_path):
+        return [run_path] if run_path.lower().endswith(".db") else []
+
+    if not os.path.isdir(run_path):
+        return []
+
     out = []
-    for fn in os.listdir(run_dir):
+    for fn in os.listdir(run_path):
         if not fn.lower().endswith(".db"):
             continue
         # Prefer only matching comp_*.db, but fall back to including everything if none match.
         if fn.lower().startswith(f"{comp_l}_"):
-            out.append(os.path.join(run_dir, fn))
+            out.append(os.path.join(run_path, fn))
     if out:
         return sorted(out)
     # fallback: include all DBs
-    return sorted([os.path.join(run_dir, fn) for fn in os.listdir(run_dir) if fn.lower().endswith(".db")])
+    return sorted([os.path.join(run_path, fn) for fn in os.listdir(run_path) if fn.lower().endswith(".db")])
 
 
 def _load_envs_from_csv(csv_path: str) -> list[str]:
@@ -208,7 +263,11 @@ def _load_envs_from_csv(csv_path: str) -> list[str]:
 def _get_args():
     p = argparse.ArgumentParser(description="Plot game sweep results into combined PNG grids (one per method DB).")
     p.add_argument("--comp", required=True, choices=["dct"], help="Compression method (determines default run-dir).")
-    p.add_argument("--run-dir", default=None, help="Directory containing per-method sweep DBs.")
+    p.add_argument(
+        "--run-dir",
+        default=None,
+        help="Directory containing per-method sweep DBs, or a single .db file (method inferred from task_json when possible).",
+    )
     p.add_argument("--out-dir", default=None, help="Directory to write PNGs to.")
     p.add_argument("--cols", type=int, default=6, help="Number of columns in the output grid.")
     p.add_argument(
@@ -232,41 +291,49 @@ def main():
     args = _get_args()
     comp = str(args.comp).lower()
 
-    run_dir = os.path.abspath(args.run_dir) if args.run_dir else os.path.abspath(_default_run_dir(comp))
+    run_path = os.path.abspath(args.run_dir) if args.run_dir else os.path.abspath(_default_run_dir(comp))
     out_dir = os.path.abspath(args.out_dir) if args.out_dir else os.path.abspath(_default_out_dir(comp))
     os.makedirs(out_dir, exist_ok=True)
 
-    if not os.path.isdir(run_dir):
-        raise SystemExit(f"--run-dir not found or not a directory: {run_dir}")
+    if not os.path.exists(run_path):
+        raise SystemExit(f"--run-dir not found: {run_path}")
 
-    db_paths = _find_db_paths(run_dir, comp=comp)
+    db_paths = _find_db_paths(run_path, comp=comp)
     if not db_paths:
-        raise SystemExit(f"No .db files found in: {run_dir}")
+        raise SystemExit(f"No .db files found in: {run_path}")
 
-    # Delay-import matplotlib so the script errors cleanly if it isn't installed.
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
 
     # Load everything once: method -> env -> runs
-    methods: list[str] = []
+    methods_set: set[str] = set()
     by_method_env: dict[str, dict[str, list[Run]]] = {}
     for db_path in db_paths:
-        method = _method_from_db_filename(comp, db_path)
+        file_method = _method_from_db_filename(comp, db_path)
         runs = _load_runs(db_path)
         if not runs:
             print(f"[skip] no runs in: {db_path}")
             continue
-        methods.append(method)
-        env_map: dict[str, list[Run]] = {}
+        inferred = []
         for r in runs:
-            env_map.setdefault(r.env_name, []).append(r)
-        by_method_env[method] = env_map
+            m = _infer_method_from_task(r.task)
+            if m:
+                inferred.append(m)
+        inferred_unique = sorted(set(inferred))
 
-    methods = sorted(set(methods))
+        # Heuristic:
+        # - If a DB contains multiple inferred methods, use them.
+        # - If the user passed a single DB, prefer inferred method labels when present (even if only one),
+        #   because filenames like `dct_subset_runs.db` often don't encode the method.
+        use_task_method = bool(inferred_unique) and (len(inferred_unique) > 1 or len(db_paths) == 1)
+
+        for r in runs:
+            method = _infer_method_from_task(r.task) if use_task_method else None
+            method = method or file_method
+            methods_set.add(method)
+            by_method_env.setdefault(method, {}).setdefault(r.env_name, []).append(r)
+
+    methods = sorted(methods_set)
     if not methods:
-        raise SystemExit(f"No usable runs found across DBs in: {run_dir}")
+        raise SystemExit(f"No usable runs found across DBs in: {run_path}")
 
     # Determine env list: either from CSV, or union across methods.
     if args.games_csv:

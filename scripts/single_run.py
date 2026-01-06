@@ -132,11 +132,12 @@ class EvoAtariPipelinePolicy:
     def forward(self, obs):
         x = normalize_frame(obs)
         feats = self._compression_fn(x, self.args)
+        # If compression returns (features, meta), keep only features.
+        if isinstance(feats, tuple) and len(feats) == 2:
+            feats = feats[0]
 
         if self._nonlin_fn is not None:
             feats = self._nonlin_fn(feats, self.args)
-            feats = np.asarray(feats, dtype=np.float32)
-
         feats = process_features(feats)
 
         logits = sm.affine_mapping(feats, self.W1, self.W2, self.b)
@@ -268,7 +269,20 @@ def run_task_local(args, run_id):
 
     for gen in range(generations):
         solutions = es.ask()  # Ask the CMA-ES for new solutions in each generation
-        results = _evaluate_generation_parallel(solutions, gen, env_name, obs_type, repeat_action_probability, frameskip, output_size, feature_shape, episodes_per_individual, max_steps_per_episode, args, cores_per_task)
+        results = _evaluate_generation_parallel(
+            solutions=solutions,
+            gen=gen,
+            env_name=env_name,
+            obs_type=obs_type,
+            repeat_action_probability=repeat_action_probability,
+            frameskip=frameskip,
+            output_size=output_size,
+            feature_shape=feature_shape,
+            episodes_per_individual=episodes_per_individual,
+            max_steps_per_episode=max_steps_per_episode,
+            args=args,
+            max_workers=cores_per_task,
+        )
 
         fitness_vals = [None] * len(solutions)
         avg_scores = [0.0] * len(solutions)

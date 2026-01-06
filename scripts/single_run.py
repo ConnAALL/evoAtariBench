@@ -56,12 +56,7 @@ def make_silent_env(env_name, obs_type, repeat_action_probability, frameskip):
     os.dup2(devnull_fd, stdout_fd)
     os.dup2(devnull_fd, stderr_fd)
     try:
-        env = gym.make(
-            id=env_name,
-            obs_type=obs_type,
-            repeat_action_probability=repeat_action_probability,
-            frameskip=frameskip,
-        )
+        env = gym.make(id=env_name, obs_type=obs_type, repeat_action_probability=repeat_action_probability, frameskip=frameskip)
     finally:
         os.dup2(saved_stdout, stdout_fd)
         os.dup2(saved_stderr, stderr_fd)
@@ -147,36 +142,13 @@ class EvoAtariPipelinePolicy:
         return logits.flatten()
 
 
-def _evaluate_individual(
-    solution,
-    individual_idx,
-    gen_idx,
-    env_name,
-    obs_type,
-    repeat_action_probability,
-    frameskip,
-    output_size,
-    feature_shape,
-    episodes_per_individual,
-    max_steps_per_episode,
-    args,
-):
+def _evaluate_individual(solution, individual_idx, gen_idx, env_name, obs_type, repeat_action_probability, frameskip, output_size, feature_shape, episodes_per_individual, max_steps_per_episode, args):
     """Evaluate the individual."""
     # Create the policy
-    policy = EvoAtariPipelinePolicy(
-        chromosome=solution,
-        output_size=output_size,
-        feature_shape=feature_shape,
-        args=args,
-    )
+    policy = EvoAtariPipelinePolicy(chromosome=solution, output_size=output_size, feature_shape=feature_shape, args=args)
 
     # Create the environment
-    env = make_silent_env(
-        env_name=env_name,
-        obs_type=obs_type,
-        repeat_action_probability=repeat_action_probability,
-        frameskip=frameskip,
-    )
+    env = make_silent_env(env_name=env_name, obs_type=obs_type, repeat_action_probability=repeat_action_probability, frameskip=frameskip)
 
     # Evaluate the individual
     total_reward = 0.0
@@ -205,43 +177,13 @@ def _evaluate_individual(
     return individual_idx, float(avg_reward), rows
 
 
-def _evaluate_generation_parallel(
-    *,
-    solutions,
-    gen,
-    env_name,
-    obs_type,
-    repeat_action_probability,
-    frameskip,
-    output_size,
-    feature_shape,
-    episodes_per_individual,
-    max_steps_per_episode,
-    args,
-    max_workers,
-):
+def _evaluate_generation_parallel(solutions, gen, env_name, obs_type, repeat_action_probability, frameskip, output_size, feature_shape, episodes_per_individual, max_steps_per_episode, args, max_workers):
     """
     Evaluate a CMA-ES generation in parallel (one individual per worker process).
     Returns the same shape as the sequential path: list[(indiv_idx, avg_score, rows)].
     """
     if max_workers <= 1 or len(solutions) <= 1:
-        return [
-            _evaluate_individual(
-                solution=solutions[i],
-                individual_idx=i,
-                gen_idx=gen,
-                env_name=env_name,
-                obs_type=obs_type,
-                repeat_action_probability=repeat_action_probability,
-                frameskip=frameskip,
-                output_size=output_size,
-                feature_shape=feature_shape,
-                episodes_per_individual=episodes_per_individual,
-                max_steps_per_episode=max_steps_per_episode,
-                args=args,
-            )
-            for i in range(len(solutions))
-        ]
+        return [_evaluate_individual(solutions[i], i, gen, env_name, obs_type, repeat_action_probability, frameskip, output_size, feature_shape, episodes_per_individual, max_steps_per_episode, args) for i in range(len(solutions))]
 
     def _mp_context_for_platform():
         if sys.platform.startswith("win") or sys.platform == "darwin":
@@ -255,21 +197,7 @@ def _evaluate_generation_parallel(
     with cf.ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as ex:
         fut_to_idx = {}
         for i in range(len(solutions)):
-            fut = ex.submit(
-                _evaluate_individual,
-                solutions[i],
-                i,
-                gen,
-                env_name,
-                obs_type,
-                repeat_action_probability,
-                frameskip,
-                output_size,
-                feature_shape,
-                episodes_per_individual,
-                max_steps_per_episode,
-                args,
-            )
+            fut = ex.submit(_evaluate_individual, solutions[i], i, gen, env_name, obs_type, repeat_action_probability, frameskip, output_size, feature_shape, episodes_per_individual, max_steps_per_episode, args)
             fut_to_idx[fut] = i
 
         for fut in cf.as_completed(fut_to_idx):
@@ -311,12 +239,7 @@ def run_task_local(args, run_id):
             pass
 
     # Create a temporary environment to get the output size
-    temp_env = make_silent_env(
-        env_name=env_name,
-        obs_type=obs_type,
-        repeat_action_probability=repeat_action_probability,
-        frameskip=frameskip,
-    )
+    temp_env = make_silent_env(env_name=env_name, obs_type=obs_type, repeat_action_probability=repeat_action_probability, frameskip=frameskip)
     output_size = int(temp_env.action_space.n)
     obs0, _ = temp_env.reset()
     obs0 = perform_noop_actions(temp_env, obs0, args)
@@ -344,20 +267,7 @@ def run_task_local(args, run_id):
 
     for gen in range(generations):
         solutions = es.ask()  # Ask the CMA-ES for new solutions in each generation
-        results = _evaluate_generation_parallel(
-            solutions=solutions,
-            gen=gen,
-            env_name=env_name,
-            obs_type=obs_type,
-            repeat_action_probability=repeat_action_probability,
-            frameskip=frameskip,
-            output_size=output_size,
-            feature_shape=feature_shape,
-            episodes_per_individual=episodes_per_individual,
-            max_steps_per_episode=max_steps_per_episode,
-            args=args,
-            max_workers=cores_per_task,
-        )
+        results = _evaluate_generation_parallel(solutions, gen, env_name, obs_type, repeat_action_probability, frameskip, output_size, feature_shape, episodes_per_individual, max_steps_per_episode, args, cores_per_task)
 
         fitness_vals = [None] * len(solutions)
         avg_scores = [0.0] * len(solutions)

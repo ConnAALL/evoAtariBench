@@ -84,9 +84,21 @@ def process_features(x):
     if isinstance(x, tuple) and len(x) == 2:  # If the input is a tuple with two elements, use the first element
         x = x[0]
     x = np.asarray(x)  # Convert the input to a numpy array
+    # If the compression method returns complex features, preserve information by concatenating real and imaginary parts
+    if np.iscomplexobj(x):
+        x = complex2real(x)
     if x.ndim != 2:
         raise ValueError(f"Compression output must be 2D (H,W); got shape={x.shape}")
     return x.astype(np.float32, copy=False)
+
+
+def complex2real(xc: np.ndarray) -> np.ndarray:
+    """
+    Convert a complex-valued array to a real-valued array by concatenating the real and imaginary parts.
+    """
+    if not np.iscomplexobj(xc):
+        raise ValueError("xc must be complex")
+    return np.concatenate([xc.real, xc.imag], axis=-1).astype(np.float32, copy=False)
 
 
 def compute_chromosome_size(feature_shape, output_size):

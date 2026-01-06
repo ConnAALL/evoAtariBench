@@ -186,6 +186,55 @@ def _align_and_mean(curves: Iterable[tuple[np.ndarray, np.ndarray]]) -> tuple[np
     return x0, ys, mean_y
 
 
+def _align_and_topk_mean(
+    curves: Iterable[tuple[np.ndarray, np.ndarray]], k: int
+) -> tuple[np.ndarray, list[np.ndarray], np.ndarray]:
+    """
+    Align curves by trimming to the shortest length; assumes x's are comparable.
+
+    Computes the mean of the top-k values across runs at each generation.
+    Returns (x, ys_trimmed, topk_mean_y).
+
+    Notes:
+    - If fewer than k runs exist, uses all available runs.
+    - This is typically used with metric='best' curves to get a "top-5 mean" across seeds.
+    """
+    curves = list(curves)
+    if not curves:
+        raise ValueError("No curves to align")
+    k = max(1, int(k))
+    min_len = min(int(len(y)) for _x, y in curves)
+    x0 = curves[0][0][:min_len]
+    ys = [y[:min_len] for _x, y in curves]
+    y_stack = np.vstack(ys)  # (n_runs, T)
+    kk = min(k, int(y_stack.shape[0]))
+    # Sort descending per time step and average top-k.
+    topk = np.sort(y_stack, axis=0)[-kk:, :]  # take largest kk
+    topk_mean_y = np.mean(topk, axis=0)
+    return x0, ys, topk_mean_y
+
+
+def _topk_runs_by_final_best(rs: list[Run], k: int) -> list[Run]:
+    """
+    Select the top-k runs ranked by their FINAL `best` value (last generation).
+    If fewer than k runs exist, returns all runs (after filtering out unreadable ones).
+    """
+    k = max(1, int(k))
+    scored: list[tuple[float, Run]] = []
+    for r in rs:
+        try:
+            _x, y_best = _extract_curve(r.plot_data, metric="best")
+            if len(y_best) == 0:
+                continue
+            scored.append((float(y_best[-1]), r))
+        except Exception:
+            continue
+    if not scored:
+        return []
+    scored.sort(key=lambda t: t[0], reverse=True)
+    return [r for _s, r in scored[: min(k, len(scored))]]
+
+
 def _best_run_by_peak_best(rs: list[Run]) -> Run | None:
     """
     Choose the single best run for a (method, env) group.
@@ -278,6 +327,7 @@ def _get_args():
     )
     p.add_argument("--dpi", type=int, default=260, help="Output image DPI.")
     p.add_argument("--title", default=None, help="Optional title prefix.")
+    p.add_argument("--top-k", type=int, default=5, help="K for top-k mean curve (used by the topk_mean metric).")
     p.add_argument(
         "--games-csv",
         default=None,
@@ -361,9 +411,17 @@ def main():
 
     method_colors = {m: f"C{i}" for i, m in enumerate(methods)}
 
-    for metric in ("best", "avg", "best_overall"):
+    for metric in ("best", "avg", "best_overall", "topk_mean", "topk_finalbest_avg"):
         fig, axes = plt.subplots(n_rows, cols, figsize=(fig_w, fig_h), squeeze=False)
-        fig.suptitle(f"{title_prefix} — methods overlay ({metric})", fontsize=12)
+        if metric == "topk_mean":
+            fig.suptitle(f"{title_prefix} — methods overlay (top-{int(args.top_k)} mean of best)", fontsize=12)
+        elif metric == "topk_finalbest_avg":
+            fig.suptitle(
+                f"{title_prefix} — methods overlay (avg curve of top-{int(args.top_k)} runs by final best)",
+                fontsize=12,
+            )
+        else:
+            fig.suptitle(f"{title_prefix} — methods overlay ({metric})", fontsize=12)
 
         handle_by_method = {}
 
@@ -384,6 +442,37 @@ def main():
                     try:
                         x, y_best = _extract_curve(br.plot_data, metric="best")
                         y = np.maximum.accumulate(y_best)  # best-so-far for that best run
+                    except Exception:
+                        continue
+                elif metric == "topk_mean":
+                    # Plot top-k mean across runs, per generation, using 'best' curves.
+                    curves = []
+                    for r in rs:
+                        try:
+                            curves.append(_extract_curve(r.plot_data, metric="best"))
+                        except Exception:
+                            continue
+                    if not curves:
+                        continue
+                    try:
+                        x, _ys, y = _align_and_topk_mean(curves, k=int(args.top_k))
+                    except Exception:
+                        continue
+                elif metric == "topk_finalbest_avg":
+                    # Select top-k runs by FINAL best, then average their AVG curves.
+                    top_rs = _topk_runs_by_final_best(rs, k=int(args.top_k))
+                    if not top_rs:
+                        continue
+                    curves = []
+                    for r in top_rs:
+                        try:
+                            curves.append(_extract_curve(r.plot_data, metric="avg"))
+                        except Exception:
+                            continue
+                    if not curves:
+                        continue
+                    try:
+                        x, _ys, y = _align_and_mean(curves)
                     except Exception:
                         continue
                 else:

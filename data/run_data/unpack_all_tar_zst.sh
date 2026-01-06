@@ -13,7 +13,7 @@ fi
 
 for f in "${archives[@]}"; do  # Extract each archive.
   echo "Extracting: $f"
-  tar --use-compress-program=unzstd -xf "$f"
+  tar -I "zstd -d -T0" -xf "$f"
 done
 
 echo "Done."

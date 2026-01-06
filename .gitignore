@@ -3,6 +3,6 @@ temp
 .DS_Store
 __pycache__
 plots/
-*.db
+*.db*
 *.log
 _in.txt

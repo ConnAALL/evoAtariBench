@@ -132,11 +132,12 @@ class EvoAtariPipelinePolicy:
     def forward(self, obs):
         x = normalize_frame(obs)
         feats = self._compression_fn(x, self.args)
-        feats = process_features(feats)
 
         if self._nonlin_fn is not None:
             feats = self._nonlin_fn(feats, self.args)
             feats = np.asarray(feats, dtype=np.float32)
+
+        feats = process_features(feats)
 
         logits = sm.affine_mapping(feats, self.W1, self.W2, self.b)
         return logits.flatten()

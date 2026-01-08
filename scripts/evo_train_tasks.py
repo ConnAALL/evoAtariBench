@@ -53,9 +53,9 @@ COMPRESSION_SWEEP = [
 # List of the different non-linearity methods to sweep through.
 NONLINEARITY_SWEEP = [
     {"nonlinearity": "none"},
-    {"nonlinearity": "sparsification_complex", "percentile": [90.0]},
-    {"nonlinearity": "quantization_complex", "num_levels": [125]},
-    {"nonlinearity": "dropout_regularization_complex", "rate": [0.19]},
+    {"nonlinearity": "sparsification", "percentile": [90.0]},
+    {"nonlinearity": "quantization", "num_levels": [125]},
+    {"nonlinearity": "dropout_regularization", "rate": [0.19]},
 ]
 
 

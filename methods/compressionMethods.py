@@ -23,6 +23,15 @@ def convert_to_grayscale(x):
     raise ValueError("expected (H,W) or (H,W,C)")
 
 
+def direct_pass(x, args=None):
+    """
+    Direct pass without any compression.
+    """
+    x = convert_to_grayscale(x)
+    if x.dtype != np.float32: x = x.astype(np.float32, copy=False)
+    return x
+
+
 def dct_k(x, args):
     """Apply 2-D Discrete Cosine Transform to x, and crop the top-left kxk corner"""
     k = args["k"]
@@ -87,6 +96,8 @@ def dwt(x, args):
 
 def get_compression_method(name):
     n = str(name).strip().lower()
+    if n == "none":
+        return direct_pass
     if n == "dct":
         return dct_k
     if n == "dft":

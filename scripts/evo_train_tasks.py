@@ -48,14 +48,12 @@ RANDOMNESS_OVERRIDE_GROUPS = []
 # List for different compression methods to sweep through. 
 COMPRESSION_SWEEP = [
     {"compression": "none"},
+    {"compression": "dct", "k": [125], "norm": ["ortho"]},
 ]
 
 # List of the different non-linearity methods to sweep through.
 NONLINEARITY_SWEEP = [
-    {"nonlinearity": "none"},
-    {"nonlinearity": "sparsification", "percentile": [90.0]},
-    {"nonlinearity": "quantization", "num_levels": [125]},
-    {"nonlinearity": "dropout_regularization", "rate": [0.19]},
+    {"nonlinearity": "sparsification", "percentile": [25.0]},
 ]
 
 
@@ -316,9 +314,7 @@ def main():
             task_line = _task_params_one_line(result.get("args", {}))
         except Exception:
             task_line = "{}"
-        logger.info(
-            f"[Task End] [run_id={rid}] [env={env_name}] [best_fitness={best_fitness:.6f}] [Task: {task_line}]"
-        )
+        logger.info(f"[Task End] [run_id={rid}] [env={env_name}] [best_fitness={best_fitness:.6f}] [Task: {task_line}]")
 
         if cursor is not None and conn is not None:
             task_json = json.dumps(result["args"])

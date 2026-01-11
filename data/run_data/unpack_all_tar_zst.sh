@@ -13,7 +13,7 @@ fi
 
 for f in "${archives[@]}"; do  # Extract each archive.
   echo "Extracting: $f"
-  tar -I "zstd -d -T0" -xf "$f"
+  tar -I "zstd -d -T0 --long=31" -xf "$f"
 done
 
 echo "Done."

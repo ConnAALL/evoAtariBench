@@ -1,13 +1,15 @@
 """
-Plot "game sweep" results as grid PNGs.
+Compare two (or more) (compression, nonlinearity) configurations head-to-head, plotted
+in the same grid style as `plot_game_sweep.py`.
 
 This is a **simple, no-CLI** plotting utility:
 - Edit the CONFIG section at the top of this file.
-- Run: `python3 result_plotting_and_analysis/plot_game_sweep.py`
+- Run: `python3 result_plotting_and_analysis/plot_compare_compression.py`
 
 Outputs (two PNGs):
-- avg_of_avgs: mean of the runs' `avg` curves (per game, per method)
-- best_overall: best-so-far curve of the single best run (per game, per method)
+- avg_of_avgs: mean of the runs' `avg` curves (per game, per label)
+- best_overall: best-so-far curve of the single best run (per game, per label)
+- top5_best_mean: mean of the top-5 runs' `best` values at each generation (per game, per label)
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ import numpy as np
 import matplotlib
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as plt  # noqa: E402
 
 try:  # Optional: match repo plotting style if available.
     import scienceplots  # type: ignore  # noqa: F401
@@ -39,43 +41,46 @@ except Exception:
 # CONFIG (edit these values; no command line args)
 ###############################################################################
 
-# Which compression sweep to plot.
-COMP: str = "none"  # examples: "dct", "dft", "none"
+# Each entry is "comp:nonlinearity". Repeat to compare multiple configurations.
+# Notes:
+# - For dft subset DBs, methods may be stored with suffix `_complex` and this script
+#   allows prefix matching (e.g. "sparsification" -> "sparsification_complex").
+PAIRS: list[str] = [
+    "dct:sparsification",
+    "none:sparsification",
+]
 
-# Data source:
-# - set to None to use the repo default: data/run_data/<COMP>_game_sweep/
-# - or set to an absolute path to a directory or a single .db file.
-RUN_DIR: str | None = None
+# Optional data overrides: comp -> absolute path to directory or single .db file.
+# If empty, uses repo defaults under data/run_data/.
+RUN_PATH_OVERRIDE: dict[str, str] = {
+    "dct": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/dct_none_comparison_1000/dct_none_comparison_1000.db",
+    "none": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/dct_none_comparison_1000/dct_none_comparison_1000.db",
+}
 
 # Output directory:
-# - set to None to use the repo default: out/plots/game_sweep/<COMP>/
+# - set to None to use the repo default: out/plots/compare_compression/subset_runs/
 # - or set to an absolute path.
 OUT_DIR: str | None = None
 
 # Plot formatting.
 COLS: int = 3
 LIMIT_GAMES: int | None = None
-DPI: int = 500
-TITLE: str | None = None  # if None, uses COMP
+DPI: int = 260
+TITLE: str | None = None  # if None, uses "compare_compression"
 
-# Layout tuning:
-# Increase this if the legend feels too close to the plots.
-BOTTOM_MARGIN_FOR_LEGEND: float = 0.10  # fraction of figure height reserved at bottom
+# For the `top5_best_mean` metric: take the top-K (by best fitness) at each generation and average.
+TOPK_BEST_MEAN: int = 5
 
 # Optional: fix game list/order using a CSV that has an `environment` column.
 GAMES_CSV: str | None = None
 
+
 def _repo_root() -> str:
-    """
-    This script lives in result_plotting_and_analysis/, so repo root is 1 level up.
-    (Fallback included in case the file is moved elsewhere.)
-    """
     here = os.path.abspath(__file__)
     d = os.path.dirname(here)  # .../result_plotting_and_analysis
     parent = os.path.dirname(d)
     if os.path.isdir(os.path.join(parent, "data")):
         return parent
-    # fallback
     return os.path.dirname(os.path.dirname(here))
 
 
@@ -86,17 +91,18 @@ def _safe_slug(s: str) -> str:
     return s or "method"
 
 
-def _infer_method_from_task(task: dict[str, Any]) -> str | None:
-    """
-    Try to infer a "method" label from the run's task dict.
+def _env_to_game(env_name: str) -> str:
+    # "ALE/SpaceInvaders-v5" -> "SpaceInvaders"
+    s = str(env_name)
+    if "/" in s:
+        s = s.split("/", 1)[1]
+    s = re.sub(r"-v\d+$", "", s, flags=re.IGNORECASE)
+    return s
 
-    This supports single-DB results where multiple methods are stored in one DB and the
-    distinguishing label lives inside `task_json` (e.g. `task_json["nonlinearity"]`).
-    """
+
+def _infer_method_from_task(task: dict[str, Any]) -> str | None:
     if not isinstance(task, dict) or not task:
         return None
-
-    # Prefer commonly-used keys first.
     preferred_keys = [
         "nonlinearity",
         "NONLINEARITY",
@@ -107,33 +113,59 @@ def _infer_method_from_task(task: dict[str, Any]) -> str | None:
         "activation",
         "ACTIVATION",
     ]
-
     for k in preferred_keys:
         if k in task:
             v = task.get(k)
             if isinstance(v, (str, int, float, bool)):
                 return _safe_slug(v)
-
-    # Fallback: any key that *looks like* it describes a method.
     for k, v in task.items():
         kl = str(k).lower()
         if "method" in kl or "nonlin" in kl or "activation" in kl:
             if isinstance(v, (str, int, float, bool)):
                 return _safe_slug(v)
+    return None
 
+
+def _infer_compression_from_task(task: dict[str, Any]) -> str | None:
+    """
+    Some DBs contain multiple compression settings in the same file; in that case we
+    must filter runs by `task_json["compression"]` (or similar keys) in addition to
+    selecting the nonlinearity method.
+    """
+    if not isinstance(task, dict) or not task:
+        return None
+    preferred_keys = [
+        "compression",
+        "COMPRESSION",
+        "compression_method",
+        "COMPRESSION_METHOD",
+        "comp",
+        "COMP",
+        "encoder",
+        "ENCODER",
+        "transform",
+        "TRANSFORM",
+        "representation",
+        "REPRESENTATION",
+    ]
+    for k in preferred_keys:
+        if k in task:
+            v = task.get(k)
+            if isinstance(v, (str, int, float, bool)):
+                return _safe_slug(v)
+    for k, v in task.items():
+        kl = str(k).lower()
+        if "compress" in kl or "encoder" in kl or "transform" in kl or "representation" in kl:
+            if isinstance(v, (str, int, float, bool)):
+                return _safe_slug(v)
     return None
 
 
 def _method_from_db_filename(comp: str, filename: str) -> str:
-    """
-    Examples:
-      comp=dct, filename=dct_dropout_250gen.db -> dropout
-      comp=dct, filename=dct_quantization_250gen.db -> quantization
-    """
     base = os.path.basename(filename)
     if base.lower().endswith(".db"):
         base = base[:-3]
-    prefix = f"{comp.lower()}_"
+    prefix = f"{str(comp).lower()}_"
     if base.lower().startswith(prefix):
         base = base[len(prefix) :]
     base = re.sub(r"_\d+gen$", "", base, flags=re.IGNORECASE)
@@ -141,13 +173,42 @@ def _method_from_db_filename(comp: str, filename: str) -> str:
     return _safe_slug(base)
 
 
-def _env_to_game(env_name: str) -> str:
-    # "ALE/SpaceInvaders-v5" -> "SpaceInvaders"
-    s = str(env_name)
-    if "/" in s:
-        s = s.split("/", 1)[1]
-    s = re.sub(r"-v\d+$", "", s, flags=re.IGNORECASE)
-    return s
+def _find_db_paths(run_path: str, comp: str) -> list[str]:
+    run_path = os.path.abspath(run_path)
+    if os.path.isfile(run_path):
+        return [run_path] if run_path.lower().endswith(".db") else []
+    if not os.path.isdir(run_path):
+        return []
+    comp_l = str(comp).lower()
+    preferred = [
+        os.path.join(run_path, fn)
+        for fn in os.listdir(run_path)
+        if fn.lower().endswith(".db") and fn.lower().startswith(f"{comp_l}_")
+    ]
+    if preferred:
+        return sorted(preferred)
+    return sorted([os.path.join(run_path, fn) for fn in os.listdir(run_path) if fn.lower().endswith(".db")])
+
+
+def _default_run_path(comp: str) -> str:
+    root = os.path.join(_repo_root(), "data", "run_data")
+    # Prefer subset-runs by default (the 5-game tests), because that's the intended use-case
+    # for compression comparisons in this repo.
+    cand_subset_dir = os.path.join(root, f"{comp}_subset_runs")
+    if os.path.isdir(cand_subset_dir):
+        return cand_subset_dir
+
+    # Fallback: full game sweep directory if it exists.
+    cand_sweep_dir = os.path.join(root, f"{comp}_game_sweep")
+    if os.path.isdir(cand_sweep_dir):
+        return cand_sweep_dir
+
+    # Final fallback: keep the sweep naming (may not exist; caller will error cleanly).
+    return cand_subset_dir
+
+
+def _default_out_dir() -> str:
+    return os.path.join(_repo_root(), "out", "plots", "compare_compression", "subset_runs")
 
 
 @dataclass(frozen=True)
@@ -201,10 +262,6 @@ def _extract_curve(plot_data: list[list[float]], metric: str) -> tuple[np.ndarra
 
 
 def _align_and_mean(curves: Iterable[tuple[np.ndarray, np.ndarray]]) -> tuple[np.ndarray, list[np.ndarray], np.ndarray]:
-    """
-    Align curves by trimming to the shortest length; assumes x's are comparable.
-    Returns (x, ys_trimmed, mean_y).
-    """
     curves = list(curves)
     if not curves:
         raise ValueError("No curves to align")
@@ -219,16 +276,6 @@ def _align_and_mean(curves: Iterable[tuple[np.ndarray, np.ndarray]]) -> tuple[np
 def _align_and_topk_mean(
     curves: Iterable[tuple[np.ndarray, np.ndarray]], k: int
 ) -> tuple[np.ndarray, list[np.ndarray], np.ndarray]:
-    """
-    Align curves by trimming to the shortest length; assumes x's are comparable.
-
-    Computes the mean of the top-k values across runs at each generation.
-    Returns (x, ys_trimmed, topk_mean_y).
-
-    Notes:
-    - If fewer than k runs exist, uses all available runs.
-    - This is typically used with metric='best' curves to get a "top-5 mean" across seeds.
-    """
     curves = list(curves)
     if not curves:
         raise ValueError("No curves to align")
@@ -238,17 +285,12 @@ def _align_and_topk_mean(
     ys = [y[:min_len] for _x, y in curves]
     y_stack = np.vstack(ys)  # (n_runs, T)
     kk = min(k, int(y_stack.shape[0]))
-    # Sort descending per time step and average top-k.
-    topk = np.sort(y_stack, axis=0)[-kk:, :]  # take largest kk
+    topk = np.sort(y_stack, axis=0)[-kk:, :]  # largest kk per timestep
     topk_mean_y = np.mean(topk, axis=0)
     return x0, ys, topk_mean_y
 
 
 def _topk_runs_by_final_best(rs: list[Run], k: int) -> list[Run]:
-    """
-    Select the top-k runs ranked by their FINAL `best` value (last generation).
-    If fewer than k runs exist, returns all runs (after filtering out unreadable ones).
-    """
     k = max(1, int(k))
     scored: list[tuple[float, Run]] = []
     for r in rs:
@@ -266,12 +308,6 @@ def _topk_runs_by_final_best(rs: list[Run], k: int) -> list[Run]:
 
 
 def _best_run_by_peak_best(rs: list[Run]) -> Run | None:
-    """
-    Choose the single best run for a (method, env) group.
-
-    We define "best" as the run with the highest peak `best` value across generations.
-    (If a run never reaches a higher best score than others, it won't be selected.)
-    """
     best_run: Run | None = None
     best_score: float | None = None
     for r in rs:
@@ -286,43 +322,7 @@ def _best_run_by_peak_best(rs: list[Run]) -> Run | None:
     return best_run
 
 
-def _default_run_dir(comp: str) -> str:
-    return os.path.join(_repo_root(), "data", "run_data", f"{comp}_game_sweep")
-
-
-def _default_out_dir(comp: str) -> str:
-    return os.path.join(_repo_root(), "out", "plots", "game_sweep", comp)
-
-
-def _find_db_paths(run_path: str, comp: str) -> list[str]:
-    comp_l = str(comp).lower()
-    run_path = os.path.abspath(run_path)
-
-    # Allow passing a single .db file directly.
-    if os.path.isfile(run_path):
-        return [run_path] if run_path.lower().endswith(".db") else []
-
-    if not os.path.isdir(run_path):
-        return []
-
-    out = []
-    for fn in os.listdir(run_path):
-        if not fn.lower().endswith(".db"):
-            continue
-        # Prefer only matching comp_*.db, but fall back to including everything if none match.
-        if fn.lower().startswith(f"{comp_l}_"):
-            out.append(os.path.join(run_path, fn))
-    if out:
-        return sorted(out)
-    # fallback: include all DBs
-    return sorted([os.path.join(run_path, fn) for fn in os.listdir(run_path) if fn.lower().endswith(".db")])
-
-
 def _load_envs_from_csv(csv_path: str) -> list[str]:
-    """
-    Load an ordered list of envs from a CSV that has an `environment` column.
-    Used to force a stable "all games" list even if some games are missing from the sweep DBs.
-    """
     if not csv_path:
         return []
     if not os.path.exists(csv_path):
@@ -339,59 +339,94 @@ def _load_envs_from_csv(csv_path: str) -> list[str]:
         return envs
 
 
-def main():
-    comp = _safe_slug(COMP)
-    run_path = os.path.abspath(RUN_DIR) if RUN_DIR else os.path.abspath(_default_run_dir(comp))
-    out_dir = os.path.abspath(OUT_DIR) if OUT_DIR else os.path.abspath(_default_out_dir(comp))
+def _parse_pair(s: str) -> tuple[str, str]:
+    if ":" not in str(s):
+        raise SystemExit(f"--pair must be 'comp:nonlinearity', got: {s!r}")
+    comp, method = s.split(":", 1)
+    comp = _safe_slug(comp)
+    method = _safe_slug(method)
+    if not comp or not method:
+        raise SystemExit(f"Bad --pair: {s!r}")
+    return comp, method
+
+
+def _resolve_method(requested: str, available: set[str]) -> str:
+    """
+    Resolve requested method name to an available method label.
+
+    - Prefer exact match
+    - Else allow prefix match (useful for dft_*_complex names when user passes 'sparsification')
+    """
+    requested = _safe_slug(requested)
+    if requested in available:
+        return requested
+    pref = sorted([m for m in available if m.startswith(requested)])
+    if len(pref) == 1:
+        return pref[0]
+    if len(pref) > 1:
+        raise SystemExit(f"Method {requested!r} is ambiguous; matches: {pref}. Please pass exact name.")
+    raise SystemExit(f"Method {requested!r} not found. Available: {sorted(available)}")
+
+
+def main() -> None:
+    pairs = [_parse_pair(s) for s in (PAIRS or [])]
+    if not pairs:
+        raise SystemExit("CONFIG error: PAIRS is empty. Add at least one entry like 'dct:sparsification'.")
+
+    override = {_safe_slug(k): os.path.abspath(v) for k, v in (RUN_PATH_OVERRIDE or {}).items()}
+
+    out_dir = os.path.abspath(OUT_DIR) if OUT_DIR else os.path.abspath(_default_out_dir())
     os.makedirs(out_dir, exist_ok=True)
 
-    if not os.path.exists(run_path):
-        raise SystemExit(f"--run-dir not found: {run_path}")
+    # Load data per pair: label -> env -> runs
+    by_label_env: dict[str, dict[str, list[Run]]] = {}
+    labels: list[str] = []
+    all_envs: set[str] = set()
 
-    db_paths = _find_db_paths(run_path, comp=comp)
-    if not db_paths:
-        raise SystemExit(f"No .db files found in: {run_path}")
+    for comp, requested_method in pairs:
+        run_path = override.get(comp) or _default_run_path(comp)
+        if not os.path.exists(run_path):
+            raise SystemExit(f"Run path not found for comp={comp}: {run_path}")
 
-    # Load everything once: method -> env -> runs
-    methods_set: set[str] = set()
-    by_method_env: dict[str, dict[str, list[Run]]] = {}
-    for db_path in db_paths:
-        file_method = _method_from_db_filename(comp, db_path)
-        runs = _load_runs(db_path)
-        if not runs:
-            print(f"[skip] no runs in: {db_path}")
-            continue
-        inferred = []
-        for r in runs:
-            m = _infer_method_from_task(r.task)
-            if m:
-                inferred.append(m)
-        inferred_unique = sorted(set(inferred))
+        db_paths = _find_db_paths(run_path, comp=comp)
+        if not db_paths:
+            raise SystemExit(f"No .db files found for comp={comp} in: {run_path}")
 
-        # Heuristic:
-        # - If a DB contains multiple inferred methods, use them.
-        # - If the user passed a single DB, prefer inferred method labels when present (even if only one),
-        #   because filenames like `dct_subset_runs.db` often don't encode the method.
-        use_task_method = bool(inferred_unique) and (len(inferred_unique) > 1 or len(db_paths) == 1)
+        # First pass: collect all runs and available method labels.
+        runs_all: list[tuple[str, Run]] = []  # (method_label, run)
+        available: set[str] = set()
+        for db in db_paths:
+            file_method = _method_from_db_filename(comp, db)
+            rs = _load_runs(db)
+            for r in rs:
+                # If the DB stores multiple compressions together, filter by task_json.
+                # If the key is missing (older/single-comp DBs), keep the run.
+                comp_in_task = _infer_compression_from_task(r.task)
+                if comp_in_task is not None and _safe_slug(comp_in_task) != _safe_slug(comp):
+                    continue
+                m = _infer_method_from_task(r.task) or file_method
+                available.add(m)
+                runs_all.append((m, r))
 
-        for r in runs:
-            method = _infer_method_from_task(r.task) if use_task_method else None
-            method = method or file_method
-            methods_set.add(method)
-            by_method_env.setdefault(method, {}).setdefault(r.env_name, []).append(r)
+        chosen_method = _resolve_method(requested_method, available)
 
-    methods = sorted(methods_set)
-    if not methods:
-        raise SystemExit(f"No usable runs found across DBs in: {run_path}")
+        label = f"{comp}+{chosen_method}"
+        labels.append(label)
+        env_map: dict[str, list[Run]] = {}
+        for m, r in runs_all:
+            if m != chosen_method:
+                continue
+            env_map.setdefault(r.env_name, []).append(r)
+        by_label_env[label] = env_map
+        all_envs.update(env_map.keys())
 
-    # Determine env list: either from CSV, or union across methods.
+        print(f"[load] {label}: dbs={len(db_paths)} envs={len(env_map)} runs={sum(len(v) for v in env_map.values())}")
+
+    # Determine env list: either from CSV, or union across labels.
     if GAMES_CSV:
         envs = _load_envs_from_csv(os.path.abspath(GAMES_CSV))
     else:
-        env_set = set()
-        for env_map in by_method_env.values():
-            env_set.update(env_map.keys())
-        envs = sorted(env_set)
+        envs = sorted(all_envs)
 
     if LIMIT_GAMES is not None:
         envs = envs[: max(0, int(LIMIT_GAMES))]
@@ -406,26 +441,26 @@ def main():
     cell_w, cell_h = 2.05, 1.55
     fig_w, fig_h = cols * cell_w, n_rows * cell_h
 
-    title_prefix = TITLE if TITLE is not None else comp
-    method_colors = {m: f"C{i}" for i, m in enumerate(methods)}
+    title_prefix = TITLE if TITLE is not None else "compare_compression"
+    colors = {lab: f"C{i}" for i, lab in enumerate(labels)}
 
-    def plot_metric(metric: str) -> None:
+    for metric in ("avg_of_avgs", "best_overall", "top5_best_mean"):
         fig, axes = plt.subplots(n_rows, cols, figsize=(fig_w, fig_h), squeeze=False)
         if metric == "avg_of_avgs":
             fig.suptitle(f"{title_prefix} — avg of avgs", fontsize=12)
         elif metric == "best_overall":
             fig.suptitle(f"{title_prefix} — best overall", fontsize=12)
-        else:
-            raise ValueError(f"unknown metric: {metric}")
+        else:  # top5_best_mean
+            fig.suptitle(f"{title_prefix} — top-{int(TOPK_BEST_MEAN)} mean (best)", fontsize=12)
 
-        handle_by_method: dict[str, Any] = {}
+        handle_by_label = {}
 
         for i, env in enumerate(envs):
             ax = axes[i // cols][i % cols]
             plotted_any = False
 
-            for m in methods:
-                rs = by_method_env.get(m, {}).get(env, [])
+            for lab in labels:
+                rs = by_label_env.get(lab, {}).get(env, [])
                 if not rs:
                     continue
 
@@ -438,7 +473,7 @@ def main():
                         y = np.maximum.accumulate(y_best)
                     except Exception:
                         continue
-                else:  # avg_of_avgs
+                elif metric == "avg_of_avgs":
                     curves = []
                     for r in rs:
                         try:
@@ -451,10 +486,24 @@ def main():
                         x, _ys, y = _align_and_mean(curves)
                     except Exception:
                         continue
+                else:  # top5_best_mean
+                    curves = []
+                    for r in rs:
+                        try:
+                            curves.append(_extract_curve(r.plot_data, metric="best"))
+                        except Exception:
+                            continue
+                    if not curves:
+                        continue
+                    try:
+                        x, _ys, y = _align_and_topk_mean(curves, k=int(TOPK_BEST_MEAN))
+                    except Exception:
+                        continue
 
-                (line,) = ax.plot(x, y, color=method_colors[m], linewidth=1.25, alpha=0.95)
+                (line,) = ax.plot(x, y, color=colors[lab], linewidth=1.25, alpha=0.95)
                 plotted_any = True
-                handle_by_method.setdefault(m, line)
+                if lab not in handle_by_label:
+                    handle_by_label[lab] = line
 
             ax.set_title(_env_to_game(env), fontsize=7)
             ax.tick_params(axis="both", which="major", labelsize=6, length=2)
@@ -471,13 +520,13 @@ def main():
                     alpha=0.6,
                 )
 
-        # Turn off any unused axes.
+        # Turn off unused axes.
         for j in range(len(envs), n_rows * cols):
             axes[j // cols][j % cols].set_axis_off()
 
-        if handle_by_method:
-            legend_labels = sorted(handle_by_method.keys())
-            legend_handles = [handle_by_method[m] for m in legend_labels]
+        if handle_by_label:
+            legend_labels = list(handle_by_label.keys())
+            legend_handles = [handle_by_label[k] for k in legend_labels]
             fig.legend(
                 legend_handles,
                 legend_labels,
@@ -488,16 +537,15 @@ def main():
                 bbox_to_anchor=(0.5, 0.01),
             )
 
-        bottom = float(BOTTOM_MARGIN_FOR_LEGEND)
-        bottom = 0.0 if not np.isfinite(bottom) else max(0.0, min(0.35, bottom))
-        fig.tight_layout(rect=[0, bottom, 1, 0.96])
-        out_path = os.path.join(out_dir, f"{comp}_methods_{metric}_grid.png")
+        fig.tight_layout(rect=[0, 0.03, 1, 0.96])
+
+        slug = "__".join([_safe_slug(l) for l in labels])
+        if len(slug) > 120:
+            slug = "pairs"
+        out_path = os.path.join(out_dir, f"compare_{slug}_{metric}_grid.png")
         fig.savefig(out_path, dpi=int(DPI))
         plt.close(fig)
         print(f"[wrote] {out_path}")
-
-    plot_metric("avg_of_avgs")
-    plot_metric("best_overall")
 
     print(f"Done. Output dir: {out_dir}")
 

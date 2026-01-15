@@ -1,382 +1,347 @@
+"""
+Simple plotting script for evo_train_runs.db that compares compression methods.
+
+This script handles cases where multiple compression methods (e.g., "none" and "dct")
+with the same nonlinearity method are stored in the same database.
+
+This is a **simple, no-CLI** plotting utility:
+- Edit the CONFIG section at the top of this file.
+- Run: `python3 result_plotting_and_analysis/plot_evo_train_runs.py`
+
+Outputs (two PNGs):
+- avg_of_avgs: mean of the runs' `avg` curves (per game, per compression method)
+- best_overall: best-so-far curve of the single best run (per game, per compression method)
+"""
+
+from __future__ import annotations
+
 import json
+import math
 import os
 import re
 import sqlite3
-from collections import defaultdict
+from dataclasses import dataclass
+from typing import Any, Iterable
+
 import numpy as np
+
+import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import scienceplots  # noqa: F401
 
-plt.style.use(["science", "no-latex"])
+try:  # Optional: match repo plotting style if available.
+    import scienceplots  # type: ignore  # noqa: F401
 
-ENV_FILTER = "ALE/SpaceInvaders-v5"
-PLOT_ALL_GAMES = True
-PLOT_YLIM_0_10000 = True
-YLIM_0_10000 = (0, 10000)
+    plt.style.use(["science", "no-latex"])
+except Exception:
+    pass
+
+###############################################################################
+# CONFIG (edit these values; no command line args)
+###############################################################################
+
+# Database file path (absolute path or relative to repo root)
+DB_PATH: str | None = None  # if None, uses: data/evo_train_runs.db
+
+# Which compression methods to plot (leave empty to plot all available)
+COMPRESSION_METHODS: list[str] = []  # examples: ["none", "dct"] or [] for all
+
+# Which nonlinearity method to filter by (leave None to use all, but must match across compressions)
+NONLINEARITY_FILTER: str | None = "sparsification"
+
+# Output directory:
+# - set to None to use the repo default: out/plots/evo_train_runs/
+# - or set to an absolute path.
+OUT_DIR: str | None = None
+
+# Plot formatting.
+COLS: int = 3
+LIMIT_GAMES: int | None = None
+DPI: int = 500
+TITLE: str | None = "evo_train_runs"  # if None, uses DB filename
 
 
-class RunSeries:
-    def __init__(self, row_id, run_id, env_name, compression, nonlinearity, signature, gens, vals):
-        self.row_id = int(row_id)
-        self.run_id = int(run_id)
-        self.env_name = str(env_name)
-        self.compression = str(compression)
-        self.nonlinearity = str(nonlinearity)
-        self.signature = str(signature)
-        self.gens = gens
-        self.vals = vals
-
-
-def _slug(s):
-    s = str(s).strip().lower()
-    s = re.sub(r"[^a-z0-9]+", "_", s)
-    return s.strip("_") or "unknown"
-
-
-def _repo_root():
-    """
-    This script lives in data/plotting_scripts/, so repo root is 3 levels up.
-    (Fallback included in case the file is moved elsewhere.)
-    """
+def _repo_root() -> str:
+    """This script lives in result_plotting_and_analysis/, so repo root is 1 level up."""
     here = os.path.abspath(__file__)
-    d = os.path.dirname(here)  # .../data/plotting_scripts
-    d_data = os.path.dirname(d)  # .../data
-    if os.path.basename(d_data) == "data":
-        return os.path.dirname(d_data)  # .../repo
+    d = os.path.dirname(here)  # .../result_plotting_and_analysis
+    parent = os.path.dirname(d)
+    if os.path.isdir(os.path.join(parent, "data")):
+        return parent
     return os.path.dirname(os.path.dirname(here))
 
 
-def _task_signature(task):
-    keep_keys = [
-        "ENV_NAME",
-        "compression",
-        "k",
-        "norm",
-        "nonlinearity",
-        "percentile",
-        "num_levels",
-        "rate",
-        "GENERATIONS",
-        "POPULATION_SIZE",
-        "CMA_SIGMA",
-        "EPISODES_PER_INDIVIDUAL",
-        "MAX_STEPS_PER_EPISODE",
-    ]
-    sub = {k: task.get(k) for k in keep_keys if k in task}
-    return json.dumps(sub, sort_keys=True, separators=(",", ":"))
+def _safe_slug(s: str) -> str:
+    s = str(s).strip().lower()
+    s = re.sub(r"[^a-z0-9]+", "_", s)
+    s = re.sub(r"_+", "_", s).strip("_")
+    return s or "method"
 
 
-def _extract_group_keys(task):
-    compression = str(task.get("compression", "unknown"))
-    nonlinearity = task.get("nonlinearity", None)
-    nonlinearity = "none" if nonlinearity is None else str(nonlinearity)
-    return compression, nonlinearity
+def _env_to_game(env_name: str) -> str:
+    # "ALE/SpaceInvaders-v5" -> "SpaceInvaders"
+    s = str(env_name)
+    if "/" in s:
+        s = s.split("/", 1)[1]
+    s = re.sub(r"-v\d+$", "", s, flags=re.IGNORECASE)
+    return s
 
 
-def _series_from_plot_data(plot_data, metric):
-    if not isinstance(plot_data, list):
-        raise ValueError("plot_data_json must decode to a list")
-    if not plot_data:
-        raise ValueError("plot_data_json is empty")
-
-    col = 2 if metric == "avg" else 1
-    gens = []
-    vals = []
-    for row in plot_data:
-        if not (isinstance(row, (list, tuple)) and len(row) >= 3):
-            continue
-        gens.append(int(row[0]))
-        vals.append(float(row[col]))
-    if not gens:
-        raise ValueError("plot_data_json had no usable rows")
-
-    x = np.asarray(gens, dtype=np.int32)
-    y = np.asarray(vals, dtype=np.float64)
-    order = np.argsort(x)
-    return x[order], y[order]
+@dataclass(frozen=True)
+class Run:
+    run_id: int
+    env_name: str
+    task: dict[str, Any]
+    plot_data: list[list[float]]
+    compression: str
+    nonlinearity: str
 
 
-def _mean_curve(series):
-    acc = defaultdict(list)
-    for s in series:
-        for g, v in zip(s.gens.tolist(), s.vals.tolist()):
-            acc[int(g)].append(float(v))
-    xs = np.asarray(sorted(acc.keys()), dtype=np.int32)
-    means = np.asarray([float(np.mean(acc[int(g)])) for g in xs], dtype=np.float64)
-    stds = np.asarray([float(np.std(acc[int(g)])) for g in xs], dtype=np.float64)
-    return xs, means, stds
-
-
-def _apply_ylim(ax, ylim):
-    if ylim is None:
-        return
-    try:
-        lo, hi = ylim
-        ax.set_ylim(lo, hi)
-    except Exception:
-        pass
-
-
-def _load_runs(db_path, metric, env_filter):
+def _load_runs(db_path: str) -> list[Run]:
+    """Load all runs from the database, extracting compression and nonlinearity from task_json."""
     con = sqlite3.connect(db_path, timeout=30.0)
     try:
         cur = con.cursor()
-        cur.execute("SELECT id, run_id, env_name, task_json, plot_data_json FROM runs")
-        out = []
-        for row_id, run_id, env_name, task_json, plot_data_json in cur.fetchall():
-            if env_filter is not None and str(env_name) != env_filter:
-                continue
+        rows = cur.execute(
+            "SELECT run_id, env_name, task_json, plot_data_json FROM runs "
+            "WHERE env_name IS NOT NULL AND plot_data_json IS NOT NULL AND task_json IS NOT NULL"
+        ).fetchall()
+        out: list[Run] = []
+        for run_id, env_name, task_json, plot_data_json in rows:
             try:
-                task = json.loads(task_json)
+                task = json.loads(task_json) if task_json is not None else {}
                 plot_data = json.loads(plot_data_json)
                 if not isinstance(task, dict):
+                    task = {}
+                if not isinstance(plot_data, list) or not plot_data:
                     continue
-                compression, nonlinearity = _extract_group_keys(task)
-                sig = _task_signature(task)
-                gens, vals = _series_from_plot_data(plot_data, metric=metric)
+
+                # Extract compression and nonlinearity from task
+                compression = _safe_slug(task.get("compression", "unknown"))
+                nonlinearity = _safe_slug(task.get("nonlinearity", "unknown"))
+
+                out.append(Run(int(run_id), str(env_name), task, plot_data, compression, nonlinearity))
             except Exception:
                 continue
-            out.append(
-                RunSeries(
-                    row_id=row_id,
-                    run_id=run_id,
-                    env_name=env_name,
-                    compression=compression,
-                    nonlinearity=nonlinearity,
-                    signature=sig,
-                    gens=gens,
-                    vals=vals,
-                )
-            )
         return out
     finally:
         con.close()
 
 
-def _plot_individuals_and_mean(
-    *,
-    series,
-    title,
-    ylabel,
-    out_path,
-    ylim=None,
-):
-    xs, mean, _std = _mean_curve(series)
-
-    fig, ax = plt.subplots(figsize=(9, 5))
-    for s in series:
-        ax.plot(s.gens, s.vals, linewidth=1.0, alpha=0.25)
-    ax.plot(xs, mean, linewidth=2.5, color="black", label="mean")
-
-    ax.set_title(title)
-    ax.set_xlabel("generation")
-    ax.set_ylabel(ylabel)
-    ax.grid(True, alpha=0.25)
-    ax.legend(loc="best")
-    _apply_ylim(ax, ylim)
-
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=200)
-    plt.close(fig)
+def _extract_curve(plot_data: list[list[float]], metric: str) -> tuple[np.ndarray, np.ndarray]:
+    """
+    plot_data rows are [generation, best, avg] (from scripts/single_run.py).
+    """
+    arr = np.asarray(plot_data, dtype=np.float64)
+    if arr.ndim != 2 or arr.shape[1] < 3:
+        raise ValueError(f"Unexpected plot_data shape: {arr.shape}")
+    x = arr[:, 0]
+    if metric in ("best", "best_overall"):
+        y = arr[:, 1]
+    elif metric == "avg":
+        y = arr[:, 2]
+    else:
+        raise ValueError("metric must be one of: best, avg, best_overall")
+    return x, y
 
 
-def _plot_mean_only(
-    *,
-    series,
-    title,
-    ylabel,
-    out_path,
-    ylim=None,
-):
-    xs, mean, std = _mean_curve(series)
-
-    fig, ax = plt.subplots(figsize=(9, 5))
-    ax.plot(xs, mean, linewidth=2.5, label="mean")
-    ax.fill_between(xs, mean - std, mean + std, alpha=0.2, label="±1 std")
-
-    ax.set_title(title)
-    ax.set_xlabel("generation")
-    ax.set_ylabel(ylabel)
-    ax.grid(True, alpha=0.25)
-    ax.legend(loc="best")
-    _apply_ylim(ax, ylim)
-
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=200)
-    plt.close(fig)
+def _align_and_mean(curves: Iterable[tuple[np.ndarray, np.ndarray]]) -> tuple[np.ndarray, list[np.ndarray], np.ndarray]:
+    """Align curves by trimming to the shortest length; assumes x's are comparable."""
+    curves = list(curves)
+    if not curves:
+        raise ValueError("No curves to align")
+    min_len = min(int(len(y)) for _x, y in curves)
+    x0 = curves[0][0][:min_len]
+    ys = [y[:min_len] for _x, y in curves]
+    y_stack = np.vstack(ys)
+    mean_y = np.mean(y_stack, axis=0)
+    return x0, ys, mean_y
 
 
-def _plot_compression_compare_nonlinearity(
-    *,
-    by_nl,
-    title,
-    ylabel,
-    out_path,
-    ylim=None,
-):
-    fig, ax = plt.subplots(figsize=(9, 5))
-    for nl, series in sorted(by_nl.items(), key=lambda kv: kv[0]):
-        xs, mean, _std = _mean_curve(series)
-        ax.plot(xs, mean, linewidth=2.25, label=nl)
-
-    ax.set_title(title)
-    ax.set_xlabel("generation")
-    ax.set_ylabel(ylabel)
-    ax.grid(True, alpha=0.25)
-    ax.legend(loc="best")
-    _apply_ylim(ax, ylim)
-
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=200)
-    plt.close(fig)
-
-
-def _plot_game_compare_compression(
-    *,
-    by_comp,
-    title,
-    ylabel,
-    out_path,
-    ylim=None,
-):
-    fig, ax = plt.subplots(figsize=(9, 5))
-    for comp, series in sorted(by_comp.items(), key=lambda kv: kv[0]):
-        xs, mean, _std = _mean_curve(series)
-        ax.plot(xs, mean, linewidth=2.25, label=f"{comp} (n={len(series)})")
-
-    ax.set_title(title)
-    ax.set_xlabel("generation")
-    ax.set_ylabel(ylabel)
-    ax.grid(True, alpha=0.25)
-    ax.legend(loc="best")
-    _apply_ylim(ax, ylim)
-
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    fig.tight_layout()
-    fig.savefig(out_path, dpi=200)
-    plt.close(fig)
+def _best_run_by_peak_best(rs: list[Run]) -> Run | None:
+    """Choose the single best run for a (compression, env) group by peak best value."""
+    best_run: Run | None = None
+    best_score: float | None = None
+    for r in rs:
+        try:
+            _x, y_best = _extract_curve(r.plot_data, metric="best")
+            score = float(np.max(y_best))
+        except Exception:
+            continue
+        if best_score is None or score > best_score:
+            best_score = score
+            best_run = r
+    return best_run
 
 
 def main():
-    repo_root = _repo_root()
-    db_path = os.path.abspath(os.path.join(repo_root, "data", "evo_train_runs.db"))
-    out_dir = os.path.abspath(os.path.join(repo_root, "plots", "evo_train_runs"))
-    metric = "avg"
-    write_mean_only = False
-    env_filter = None if PLOT_ALL_GAMES else ENV_FILTER
+    # Determine database path
+    if DB_PATH:
+        db_path = os.path.abspath(DB_PATH)
+    else:
+        db_path = os.path.join(_repo_root(), "data", "evo_train_runs.db")
 
-    runs = _load_runs(db_path, metric=metric, env_filter=env_filter)
-    if not runs:
-        print(f"No runs found in DB for env={env_filter!r}. db={db_path}")
-        return 1
+    if not os.path.exists(db_path):
+        raise SystemExit(f"Database not found: {db_path}")
 
-    ylabel = "avg reward" if metric == "avg" else "best reward"
-    zoom_ylim = YLIM_0_10000 if PLOT_YLIM_0_10000 else None
-    zoom_dir = os.path.join(out_dir, "zoom_0_10000")
+    # Determine output directory
+    if OUT_DIR:
+        out_dir = os.path.abspath(OUT_DIR)
+    else:
+        out_dir = os.path.join(_repo_root(), "out", "plots", "evo_train_runs")
+    os.makedirs(out_dir, exist_ok=True)
 
-    groups = defaultdict(list)
-    for r in runs:
-        groups[(r.compression, r.nonlinearity)].append(r)
+    # Load all runs
+    print(f"[load] Loading runs from: {db_path}")
+    all_runs = _load_runs(db_path)
+    print(f"[load] Found {len(all_runs)} total runs")
 
-    for (comp, nl), series in sorted(groups.items(), key=lambda kv: (kv[0][0], kv[0][1])):
-        sigs = {s.signature for s in series}
-        if len(sigs) > 1:
-            print(
-                f"[warn] mixed parameter settings in group (compression={comp}, nonlinearity={nl}); "
-                f"signatures={len(sigs)} (mean curve may be meaningless)"
-            )
+    # Filter by nonlinearity if specified
+    if NONLINEARITY_FILTER:
+        nonlinearity_filter = _safe_slug(NONLINEARITY_FILTER)
+        all_runs = [r for r in all_runs if r.nonlinearity == nonlinearity_filter]
+        print(f"[filter] After nonlinearity filter ({nonlinearity_filter}): {len(all_runs)} runs")
 
-        title_base = f"{comp} + {nl} ({len(series)} runs) [{metric}]"
-        base = f"{_slug(comp)}__{_slug(nl)}__{metric}"
+    # Group by compression and env: compression -> env -> runs
+    by_comp_env: dict[str, dict[str, list[Run]]] = {}
+    compressions_set: set[str] = set()
 
-        _plot_individuals_and_mean(
-            series=series,
-            title=title_base + " individuals + mean",
-            ylabel=ylabel,
-            out_path=os.path.join(out_dir, f"{base}__individuals.png"),
-        )
-        if zoom_ylim is not None:
-            _plot_individuals_and_mean(
-                series=series,
-                title=title_base + " individuals + mean [ylim 0..10000]",
-                ylabel=ylabel,
-                out_path=os.path.join(zoom_dir, f"{base}__individuals.png"),
-                ylim=zoom_ylim,
-            )
-        if bool(write_mean_only):
-            _plot_mean_only(
-                series=series,
-                title=title_base + " mean",
-                ylabel=ylabel,
-                out_path=os.path.join(out_dir, f"{base}__mean.png"),
-            )
-            if zoom_ylim is not None:
-                _plot_mean_only(
-                    series=series,
-                    title=title_base + " mean [ylim 0..10000]",
-                    ylabel=ylabel,
-                    out_path=os.path.join(zoom_dir, f"{base}__mean.png"),
-                    ylim=zoom_ylim,
+    for r in all_runs:
+        compressions_set.add(r.compression)
+        by_comp_env.setdefault(r.compression, {}).setdefault(r.env_name, []).append(r)
+
+    compressions = sorted(compressions_set)
+
+    # Filter compressions if specified
+    if COMPRESSION_METHODS:
+        requested = {_safe_slug(c) for c in COMPRESSION_METHODS}
+        compressions = [c for c in compressions if c in requested]
+        if not compressions:
+            raise SystemExit(f"No runs found for requested compression methods: {COMPRESSION_METHODS}")
+
+    print(f"[found] Compression methods: {compressions}")
+
+    if not compressions:
+        raise SystemExit("No compression methods found in database")
+
+    # Determine env list: union across compressions
+    env_set = set()
+    for comp in compressions:
+        env_set.update(by_comp_env.get(comp, {}).keys())
+    envs = sorted(env_set)
+
+    if LIMIT_GAMES is not None:
+        envs = envs[: max(0, int(LIMIT_GAMES))]
+
+    if not envs:
+        raise SystemExit("No games/envs to plot.")
+
+    print(f"[found] Environments: {len(envs)} ({', '.join([_env_to_game(e) for e in envs[:5]])}{'...' if len(envs) > 5 else ''})")
+
+    # Setup plot layout
+    cols = max(1, int(COLS))
+    n_rows = int(math.ceil(len(envs) / float(cols)))
+
+    cell_w, cell_h = 2.05, 1.55
+    fig_w, fig_h = cols * cell_w, n_rows * cell_h
+
+    title_prefix = TITLE if TITLE is not None else os.path.splitext(os.path.basename(db_path))[0]
+    comp_colors = {c: f"C{i}" for i, c in enumerate(compressions)}
+
+    def plot_metric(metric: str) -> None:
+        fig, axes = plt.subplots(n_rows, cols, figsize=(fig_w, fig_h), squeeze=False)
+        if metric == "avg_of_avgs":
+            fig.suptitle(f"{title_prefix} — avg of avgs", fontsize=12)
+        elif metric == "best_overall":
+            fig.suptitle(f"{title_prefix} — best overall", fontsize=12)
+        else:
+            raise ValueError(f"unknown metric: {metric}")
+
+        handle_by_comp: dict[str, Any] = {}
+
+        for i, env in enumerate(envs):
+            ax = axes[i // cols][i % cols]
+            plotted_any = False
+
+            for comp in compressions:
+                rs = by_comp_env.get(comp, {}).get(env, [])
+                if not rs:
+                    continue
+
+                if metric == "best_overall":
+                    br = _best_run_by_peak_best(rs)
+                    if br is None:
+                        continue
+                    try:
+                        x, y_best = _extract_curve(br.plot_data, metric="best")
+                        y = np.maximum.accumulate(y_best)
+                    except Exception:
+                        continue
+                else:  # avg_of_avgs
+                    curves = []
+                    for r in rs:
+                        try:
+                            curves.append(_extract_curve(r.plot_data, metric="avg"))
+                        except Exception:
+                            continue
+                    if not curves:
+                        continue
+                    try:
+                        x, _ys, y = _align_and_mean(curves)
+                    except Exception:
+                        continue
+
+                (line,) = ax.plot(x, y, color=comp_colors[comp], linewidth=1.25, alpha=0.95)
+                plotted_any = True
+                handle_by_comp.setdefault(comp, line)
+
+            ax.set_title(_env_to_game(env), fontsize=7)
+            ax.tick_params(axis="both", which="major", labelsize=6, length=2)
+            ax.grid(True, alpha=0.12, linewidth=0.4)
+            if not plotted_any:
+                ax.text(
+                    0.5,
+                    0.5,
+                    "no data",
+                    ha="center",
+                    va="center",
+                    fontsize=6,
+                    transform=ax.transAxes,
+                    alpha=0.6,
                 )
 
-    by_comp = defaultdict(lambda: defaultdict(list))
-    for (comp, nl), series in groups.items():
-        by_comp[comp][nl] = series
+        # Turn off any unused axes
+        for j in range(len(envs), n_rows * cols):
+            axes[j // cols][j % cols].set_axis_off()
 
-    for comp, by_nl in sorted(by_comp.items(), key=lambda kv: kv[0]):
-        if len(by_nl) < 2:
-            continue
-        title = f"{comp} compare nonlinearities (mean curves) [{metric}]"
-        out_path = os.path.join(out_dir, f"{_slug(comp)}__compare_nonlinearity__{metric}.png")
-        _plot_compression_compare_nonlinearity(
-            by_nl=by_nl,
-            title=title,
-            ylabel=ylabel,
-            out_path=out_path,
-        )
-        if zoom_ylim is not None:
-            out_path = os.path.join(zoom_dir, f"{_slug(comp)}__compare_nonlinearity__{metric}.png")
-            _plot_compression_compare_nonlinearity(
-                by_nl=by_nl,
-                title=f"{comp} compare nonlinearities (mean curves) [{metric}] [ylim 0..10000]",
-                ylabel=ylabel,
-                out_path=out_path,
-                ylim=zoom_ylim,
+        if handle_by_comp:
+            legend_labels = sorted(handle_by_comp.keys())
+            legend_handles = [handle_by_comp[c] for c in legend_labels]
+            fig.legend(
+                legend_handles,
+                legend_labels,
+                loc="lower center",
+                ncol=min(len(legend_labels), cols),
+                fontsize=8,
+                frameon=False,
+                bbox_to_anchor=(0.5, 0.01),
             )
 
-    by_env = defaultdict(lambda: defaultdict(list))
-    for r in runs:
-        by_env[r.env_name][r.compression].append(r)
+        fig.tight_layout(rect=[0, 0.03, 1, 0.96])
+        slug = "__".join([_safe_slug(c) for c in compressions])
+        if len(slug) > 120:
+            slug = "compressions"
+        out_path = os.path.join(out_dir, f"{_safe_slug(title_prefix)}_{slug}_{metric}_grid.png")
+        fig.savefig(out_path, dpi=int(DPI))
+        plt.close(fig)
+        print(f"[wrote] {out_path}")
 
-    for env_name, by_comp_for_env in sorted(by_env.items(), key=lambda kv: kv[0]):
-        title = f"{env_name} compare compressions (mean curves) [{metric}]"
-        out_path = os.path.join(out_dir, "by_game", f"{_slug(env_name)}__compare_compression__{metric}.png")
-        _plot_game_compare_compression(
-            by_comp=by_comp_for_env,
-            title=title,
-            ylabel=ylabel,
-            out_path=out_path,
-        )
-        if zoom_ylim is not None:
-            out_path = os.path.join(
-                out_dir, "by_game", "zoom_0_10000", f"{_slug(env_name)}__compare_compression__{metric}.png"
-            )
-            _plot_game_compare_compression(
-                by_comp=by_comp_for_env,
-                title=f"{env_name} compare compressions (mean curves) [{metric}] [ylim 0..10000]",
-                ylabel=ylabel,
-                out_path=out_path,
-                ylim=zoom_ylim,
-            )
+    plot_metric("avg_of_avgs")
+    plot_metric("best_overall")
 
-    print(f"Wrote plots to: {out_dir}")
-    return 0
+    print(f"Done. Output dir: {out_dir}")
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
-
-
+    main()

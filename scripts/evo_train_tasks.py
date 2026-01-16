@@ -47,8 +47,7 @@ RANDOMNESS_OVERRIDE_GROUPS = []
 
 # List for different compression methods to sweep through. 
 COMPRESSION_SWEEP = [
-    {"compression": "none"},
-    {"compression": "dct", "k": [125], "norm": ["ortho"]},
+    {"compression": "dct", "k": [25], "norm": ["ortho"]},
 ]
 
 # List of the different non-linearity methods to sweep through.
@@ -310,14 +309,26 @@ def main():
         env_name = str(result["env_name"])
         best_fitness = float(result["best_fitness"])
         print(f"⇢ Finished run_id={rid} env={env_name} best_fitness={best_fitness:.2f}")
+
+        args_with_meta = dict(result.get("args", {}) or {})
         try:
-            task_line = _task_params_one_line(result.get("args", {}))
+            if "chromosome_size" in result:
+                args_with_meta["N_PARAMS"] = int(result["chromosome_size"])
+            if "feature_shape" in result:
+                args_with_meta["FEATURE_SHAPE"] = result["feature_shape"]
+            if "output_size" in result:
+                args_with_meta["OUTPUT_SIZE"] = int(result["output_size"])
+        except Exception:
+            pass
+
+        try:
+            task_line = _task_params_one_line(args_with_meta)
         except Exception:
             task_line = "{}"
         logger.info(f"[Task End] [run_id={rid}] [env={env_name}] [best_fitness={best_fitness:.6f}] [Task: {task_line}]")
 
         if cursor is not None and conn is not None:
-            task_json = json.dumps(result["args"])
+            task_json = json.dumps(args_with_meta)
             plot_data_json = json.dumps(result["plot_data"])
             best_individuals_json = json.dumps(result["best_individuals"])
             best_solution_json = json.dumps(result["best_solution"]) if result.get("best_solution") is not None else None

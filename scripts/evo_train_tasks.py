@@ -47,7 +47,9 @@ RANDOMNESS_OVERRIDE_GROUPS = []
 
 # List for different compression methods to sweep through. 
 COMPRESSION_SWEEP = [
+    {"compression": "none"},
     {"compression": "dct", "k": [25], "norm": ["ortho"]},
+    {"compression": "dct", "k": [125], "norm": ["ortho"]},
 ]
 
 # List of the different non-linearity methods to sweep through.

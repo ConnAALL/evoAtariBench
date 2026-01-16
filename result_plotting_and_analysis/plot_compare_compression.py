@@ -48,13 +48,23 @@ except Exception:
 PAIRS: list[str] = [
     "dct:sparsification",
     "none:sparsification",
+    "dct_k25:sparsification",
 ]
+
+# Optional per-label task filters.
+# Use this when a DB contains runs that should be separated into multiple curves,
+# e.g. DCT with different k values. Keys are the *comp* strings used in `PAIRS`.
+# Example:
+#   PAIRS = ["dct:sparsification", "none:sparsification", "dct_k25:sparsification"]
+#   TASK_FILTERS = {"dct_k25": {"k": 25}}
+TASK_FILTERS: dict[str, dict[str, Any]] = {"dct_k25": {"k": 25}}
 
 # Optional data overrides: comp -> absolute path to directory or single .db file.
 # If empty, uses repo defaults under data/run_data/.
 RUN_PATH_OVERRIDE: dict[str, str] = {
     "dct": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/dct_none_comparison_1000/dct_none_comparison_1000.db",
     "none": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/dct_none_comparison_1000/dct_none_comparison_1000.db",
+    "dct_k25": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/dct_k25_1000/dct_k25_1000.db",
 }
 
 # Output directory:
@@ -159,6 +169,38 @@ def _infer_compression_from_task(task: dict[str, Any]) -> str | None:
             if isinstance(v, (str, int, float, bool)):
                 return _safe_slug(v)
     return None
+
+
+def _base_comp(comp: str) -> str:
+    """
+    Allow alias labels like `dct_k25` while still filtering compression as `dct`.
+    """
+    comp = _safe_slug(comp)
+    if "_" in comp:
+        return comp.split("_", 1)[0]
+    return comp
+
+
+def _task_matches_filters(task: dict[str, Any], filters: dict[str, Any] | None) -> bool:
+    """
+    Exact-match filters on task_json fields after slugging both sides where possible.
+    """
+    if not filters:
+        return True
+    if not isinstance(task, dict):
+        return False
+    for k, expected in filters.items():
+        if k not in task:
+            return False
+        actual = task.get(k)
+        # Compare slugged strings/bools/nums in a forgiving way.
+        if isinstance(expected, (str, int, float, bool)) and isinstance(actual, (str, int, float, bool)):
+            if _safe_slug(actual) != _safe_slug(expected):
+                return False
+        else:
+            if actual != expected:
+                return False
+    return True
 
 
 def _method_from_db_filename(comp: str, filename: str) -> str:
@@ -374,6 +416,7 @@ def main() -> None:
         raise SystemExit("CONFIG error: PAIRS is empty. Add at least one entry like 'dct:sparsification'.")
 
     override = {_safe_slug(k): os.path.abspath(v) for k, v in (RUN_PATH_OVERRIDE or {}).items()}
+    task_filters = {_safe_slug(k): v for k, v in (TASK_FILTERS or {}).items()}
 
     out_dir = os.path.abspath(OUT_DIR) if OUT_DIR else os.path.abspath(_default_out_dir())
     os.makedirs(out_dir, exist_ok=True)
@@ -402,7 +445,9 @@ def main() -> None:
                 # If the DB stores multiple compressions together, filter by task_json.
                 # If the key is missing (older/single-comp DBs), keep the run.
                 comp_in_task = _infer_compression_from_task(r.task)
-                if comp_in_task is not None and _safe_slug(comp_in_task) != _safe_slug(comp):
+                if comp_in_task is not None and _safe_slug(comp_in_task) != _safe_slug(_base_comp(comp)):
+                    continue
+                if not _task_matches_filters(r.task, task_filters.get(comp)):
                     continue
                 m = _infer_method_from_task(r.task) or file_method
                 available.add(m)

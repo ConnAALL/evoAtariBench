@@ -227,7 +227,18 @@ def run_task_local(args, run_id):
     frameskip = int(get_key("FRAMESKIP"))
     repeat_action_probability = float(get_key("REPEAT_ACTION_PROBABILITY"))
 
-    generations = int(get_key("GENERATIONS"))
+    generations_raw = args.get("GENERATIONS", None)
+    games_to_play_raw = args.get("GAMES_TO_PLAY", None)
+    if (generations_raw is None) == (games_to_play_raw is None):
+        raise ValueError("Config must set exactly one of 'GENERATIONS' or 'GAMES_TO_PLAY' (mutually exclusive). Got GENERATIONS={generations_raw!r}, GAMES_TO_PLAY={games_to_play_raw!r}.")
+
+    generations = int(generations_raw) if generations_raw is not None else None
+    games_to_play = int(games_to_play_raw) if games_to_play_raw is not None else None
+    if generations is not None and generations < 1:
+        raise ValueError(f"'GENERATIONS' must be >= 1; got {generations}.")
+    if games_to_play is not None and games_to_play < 0:
+        raise ValueError(f"'GAMES_TO_PLAY' must be >= 0; got {games_to_play}.")
+
     cma_sigma = float(get_key("CMA_SIGMA"))
     episodes_per_individual = int(get_key("EPISODES_PER_INDIVIDUAL"))
     max_steps_per_episode = int(get_key("MAX_STEPS_PER_EPISODE"))
@@ -268,7 +279,14 @@ def run_task_local(args, run_id):
     best_fitness_so_far = float("-inf")
     best_solution_so_far = None
 
-    for gen in range(generations):
+    games_played = 0
+    gen = 0
+    while True:
+        if generations is not None and gen >= generations:
+            break
+        if games_to_play is not None and games_played >= games_to_play:
+            break
+
         solutions = es.ask()  # Ask the CMA-ES for new solutions in each generation
         popsize = int(len(solutions))
         population_size_log.append([int(gen + 1), popsize])
@@ -286,6 +304,8 @@ def run_task_local(args, run_id):
             args=args,
             max_workers=cores_per_task,
         )
+
+        games_played += popsize * int(episodes_per_individual)
 
         fitness_vals = [None] * len(solutions)
         avg_scores = [0.0] * len(solutions)
@@ -319,6 +339,8 @@ def run_task_local(args, run_id):
                 print(f"[Run {int(run_id):02d}] [GEN {int(gen + 1):04d}] [BEST {best_val:.2f}] [AVG {avg_val:.2f}]")
             except OSError:
                 pass
+
+        gen += 1
 
     return {
         "run_id": int(run_id),

@@ -20,7 +20,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Add 
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
-from scripts.single_run import run_task_remote  # This is the function to run a single task on a Ray cluster
+from scripts.single_run import run_task_remote, run_task_local  # Functions for running a single task locally or on a Ray cluster
 
 # Default arguments for the tasks.
 _DEFAULT_ARGS_PATH = os.path.join(os.path.dirname(__file__), "config.yml")
@@ -219,11 +219,79 @@ def check_db(db_path):
     return conn
 
 
+def init_db(db_path: str, no_save: bool):
+    """Initialize DB connection + cursor (or return (None, None) if no_save)."""
+    if no_save:
+        return None, None
+    conn = check_db(db_path)
+    cursor = conn.cursor()
+    return conn, cursor
+
+
+def write_db(conn, cursor, rid: int, env_name: str, args_with_meta: dict, best_fitness: float, result: dict):
+    """Write a finished run into SQLite (no-op if conn/cursor are None)."""
+    if cursor is None or conn is None:
+        return
+
+    task_json = json.dumps(args_with_meta)
+    plot_data_json = json.dumps(result["plot_data"])
+    best_individuals_json = json.dumps(result["best_individuals"])
+    best_solution_json = json.dumps(result["best_solution"]) if result.get("best_solution") is not None else None
+    fitness_log_json = json.dumps(result["fitness_log"])
+    population_size_log_json = json.dumps(result.get("population_size_log", []))
+
+    cursor.execute(
+        """
+        INSERT INTO runs
+          (run_id, env_name, task_json, best_fitness, best_solution_json, plot_data_json, best_individuals_json, fitness_log_json, population_size_log_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+        """,
+        (rid, env_name, task_json, best_fitness, best_solution_json, plot_data_json, best_individuals_json, fitness_log_json, population_size_log_json),
+    )
+    conn.commit()
+
+
+def close_db(conn, cursor, no_save: bool):
+    """Close DB cursor/connection (no-op if no_save)."""
+    if no_save:
+        return
+    cursor.close()
+    conn.close()
+
+
+def process_results(logger, conn, cursor, result: dict):
+    """Process a finished run result: print, log, and write to DB."""
+    rid = int(result["run_id"])
+    env_name = str(result["env_name"])
+    best_fitness = float(result["best_fitness"])
+    print(f"⇢ Finished run_id={rid} env={env_name} best_fitness={best_fitness:.2f}")
+
+    args_with_meta = dict(result.get("args", {}) or {})
+    try:
+        if "chromosome_size" in result:
+            args_with_meta["N_PARAMS"] = int(result["chromosome_size"])
+        if "feature_shape" in result:
+            args_with_meta["FEATURE_SHAPE"] = result["feature_shape"]
+        if "output_size" in result:
+            args_with_meta["OUTPUT_SIZE"] = int(result["output_size"])
+    except Exception:
+        pass
+
+    try:
+        task_line = _task_params_one_line(args_with_meta)
+    except Exception:
+        task_line = "{}"
+    logger.info(f"[Task End] [run_id={rid}] [env={env_name}] [best_fitness={best_fitness:.6f}] [Task: {task_line}]")
+
+    write_db(conn=conn, cursor=cursor, rid=rid, env_name=env_name, args_with_meta=args_with_meta, best_fitness=best_fitness, result=result)
+
+
 def get_args():
     """Parse the command line arguments."""
     parser = argparse.ArgumentParser(description="Dispatch EvoAtariBench training tasks to a Ray cluster.")
     parser.add_argument("--dry-run", action="store_true", help="Print the expanded task list (preview) and exit without running Ray.")
     parser.add_argument("--no-save", action="store_true", help="Do not write results to SQLite; only print progress.")
+    parser.add_argument("--local-run", action="store_true", help="Run the full pipeline locally (by default, the pipeline runs on a Ray cluster).")
     parser.add_argument("--all-games", action="store_true", help="Sweep through every environment listed in data/baselines/atari_game_infos_covered.csv.")
     parser.add_argument("--db-name", default="evo_train_runs.db", help="SQLite DB filename to write under data/ (or pass a full path). Default: evo_train_runs.db")
     return parser.parse_args()
@@ -263,97 +331,61 @@ def main():
             return
         return
 
-    ray.init(  # Initialize the Ray cluster
-        address=RAY_HEAD,  # The address of the Ray head
-        ignore_reinit_error=True,  # Ignore the error if the Ray cluster is already initialized
-        runtime_env={
-            "working_dir": repo_root,  # The working directory of the ray cluster
-            "excludes": [  # Remove all the extra folders
-                ".git/**",
-                "data/**",
-                "out/**",
-                "parameter_tests/**",
-                "result_plotting_and_analysis/**",
-                "tests/**",
-                "__pycache__/**",
-                "temp/**",
-                ".gitignore",
-                "environment.yml",
-                "notes.txt",
-                "requirements.txt",
-                "test_image.jpg",
-            ],
-        },
-    )
+    conn, cursor = init_db(db_path=db_path, no_save=bool(args.no_save))
 
-    conn = None
-    cursor = None
-    if not args.no_save:  # If we are not in the no-save mode, connect to the database
-        conn = check_db(db_path)
-        cursor = conn.cursor()
+    if not bool(args.local_run):
+        ray.init(  # Initialize the Ray cluster
+            address=RAY_HEAD,  # The address of the Ray head
+            ignore_reinit_error=True,  # Ignore the error if the Ray cluster is already initialized
+            runtime_env={
+                "working_dir": repo_root,  # The working directory of the ray cluster
+                "excludes": [  # Remove all the extra folders
+                    ".git/**",
+                    "data/**",
+                    "out/**",
+                    "parameter_tests/**",
+                    "result_plotting_and_analysis/**",
+                    "tests/**",
+                    "__pycache__/**",
+                    "temp/**",
+                    ".gitignore",
+                    "environment.yml",
+                    "notes.txt",
+                    "requirements.txt",
+                    "**.jpg",
+                ],
+            },
+        )
 
-    ray_tasks = []
-    for i, args_dict in enumerate(tasks, start=1):
-        cores = int(args_dict.get("CORES_PER_TASK", 1))
-        logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
-        ray_tasks.append(run_task_remote.options(max_retries=3, retry_exceptions=True, num_cpus=cores).remote(args_dict, run_id=i))
+        ray_tasks = []
+        for i, args_dict in enumerate(tasks, start=1):
+            cores = int(args_dict.get("CORES_PER_TASK", 1))
+            logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
+            ray_tasks.append(run_task_remote.options(max_retries=3, retry_exceptions=True, num_cpus=cores).remote(args_dict, run_id=i))
 
-    remaining = set(ray_tasks)  # Set of the remaining tasks to be completed
-    while remaining:  # While there are remaining tasks to be completed
-        done, remaining = ray.wait(list(remaining), num_returns=1, timeout=None)
-        finished_ref = done[0]
-        try:
-            result = ray.get(finished_ref)
-        except Exception as e:
-            logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
-            continue
-
-        rid = int(result["run_id"])
-        env_name = str(result["env_name"])
-        best_fitness = float(result["best_fitness"])
-        print(f"⇢ Finished run_id={rid} env={env_name} best_fitness={best_fitness:.2f}")
-
-        args_with_meta = dict(result.get("args", {}) or {})
-        try:
-            if "chromosome_size" in result:
-                args_with_meta["N_PARAMS"] = int(result["chromosome_size"])
-            if "feature_shape" in result:
-                args_with_meta["FEATURE_SHAPE"] = result["feature_shape"]
-            if "output_size" in result:
-                args_with_meta["OUTPUT_SIZE"] = int(result["output_size"])
-        except Exception:
-            pass
-
-        try:
-            task_line = _task_params_one_line(args_with_meta)
-        except Exception:
-            task_line = "{}"
-        logger.info(f"[Task End] [run_id={rid}] [env={env_name}] [best_fitness={best_fitness:.6f}] [Task: {task_line}]")
-
-        if cursor is not None and conn is not None:
-            task_json = json.dumps(args_with_meta)
-            plot_data_json = json.dumps(result["plot_data"])
-            best_individuals_json = json.dumps(result["best_individuals"])
-            best_solution_json = json.dumps(result["best_solution"]) if result.get("best_solution") is not None else None
-            fitness_log_json = json.dumps(result["fitness_log"])
-            population_size_log_json = json.dumps(result.get("population_size_log", []))
-
-            cursor.execute(
-                """
-                INSERT INTO runs
-                  (run_id, env_name, task_json, best_fitness, best_solution_json, plot_data_json, best_individuals_json, fitness_log_json, population_size_log_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-                """,
-                (rid, env_name, task_json, best_fitness, best_solution_json, plot_data_json, best_individuals_json, fitness_log_json, population_size_log_json),
-            )
-            conn.commit()
+        remaining = set(ray_tasks)  # Set of the remaining tasks to be completed
+        while remaining:  # While there are remaining tasks to be completed
+            done, remaining = ray.wait(list(remaining), num_returns=1, timeout=None)
+            finished_ref = done[0]
+            try:
+                result = ray.get(finished_ref)
+            except Exception as e:
+                logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
+                continue
+            process_results(logger=logger, conn=conn, cursor=cursor, result=result)
+        ray.shutdown()
+    else:
+        for i, args_dict in enumerate(tasks, start=1):
+            logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
+            try:
+                result = run_task_local(args_dict, run_id=i)
+            except Exception as e:
+                logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
+                continue
+            process_results(logger=logger, conn=conn, cursor=cursor, result=result)
 
     # Close the connections to the database
-    if not args.no_save:
-        cursor.close()
-        conn.close()
-
-    ray.shutdown()
+    close_db(conn=conn, cursor=cursor, no_save=bool(args.no_save))
     logger.info("[Log End]")
 
 

@@ -263,12 +263,15 @@ def run_task_local(args, run_id):
     fitness_log = []
     best_individuals = []
     plot_data = []
+    population_size_log = []
 
     best_fitness_so_far = float("-inf")
     best_solution_so_far = None
 
     for gen in range(generations):
         solutions = es.ask()  # Ask the CMA-ES for new solutions in each generation
+        popsize = int(len(solutions))
+        population_size_log.append([int(gen + 1), popsize])
         results = _evaluate_generation_parallel(
             solutions=solutions,
             gen=gen,
@@ -324,6 +327,7 @@ def run_task_local(args, run_id):
         "output_size": output_size,
         "feature_shape": list(feature_shape),
         "chromosome_size": int(chromosome_size),
+        "population_size_log": population_size_log,
         "fitness_log": fitness_log,
         "best_individuals": best_individuals,
         "plot_data": plot_data,

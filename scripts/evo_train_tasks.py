@@ -210,6 +210,7 @@ def check_db(db_path):
             plot_data_json       TEXT NOT NULL,
             best_individuals_json TEXT NOT NULL,
             fitness_log_json     TEXT,
+            population_size_log_json TEXT,
             inserted_at      DATETIME DEFAULT CURRENT_TIMESTAMP
         );
         """
@@ -335,14 +336,15 @@ def main():
             best_individuals_json = json.dumps(result["best_individuals"])
             best_solution_json = json.dumps(result["best_solution"]) if result.get("best_solution") is not None else None
             fitness_log_json = json.dumps(result["fitness_log"])
+            population_size_log_json = json.dumps(result.get("population_size_log", []))
 
             cursor.execute(
                 """
                 INSERT INTO runs
-                  (run_id, env_name, task_json, best_fitness, best_solution_json, plot_data_json, best_individuals_json, fitness_log_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                  (run_id, env_name, task_json, best_fitness, best_solution_json, plot_data_json, best_individuals_json, fitness_log_json, population_size_log_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
                 """,
-                (rid, env_name, task_json, best_fitness, best_solution_json, plot_data_json, best_individuals_json, fitness_log_json),
+                (rid, env_name, task_json, best_fitness, best_solution_json, plot_data_json, best_individuals_json, fitness_log_json, population_size_log_json),
             )
             conn.commit()
 

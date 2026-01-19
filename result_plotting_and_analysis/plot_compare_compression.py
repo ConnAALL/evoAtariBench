@@ -49,6 +49,7 @@ PAIRS: list[str] = [
     "dct:sparsification",
     "none:sparsification",
     "dct_k25:sparsification",
+    "dct_k1:sparsification",
 ]
 
 # Optional per-label task filters.
@@ -57,7 +58,7 @@ PAIRS: list[str] = [
 # Example:
 #   PAIRS = ["dct:sparsification", "none:sparsification", "dct_k25:sparsification"]
 #   TASK_FILTERS = {"dct_k25": {"k": 25}}
-TASK_FILTERS: dict[str, dict[str, Any]] = {"dct_k25": {"k": 25}}
+TASK_FILTERS: dict[str, dict[str, Any]] = {"dct_k25": {"k": 25}, "dct_k1": {"k": 1}}
 
 # Optional data overrides: comp -> absolute path to directory or single .db file.
 # If empty, uses repo defaults under data/run_data/.
@@ -65,6 +66,7 @@ RUN_PATH_OVERRIDE: dict[str, str] = {
     "dct": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/dct_none_comparison_1000/dct_none_comparison_1000.db",
     "none": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/dct_none_comparison_1000/dct_none_comparison_1000.db",
     "dct_k25": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/dct_k25_1000/dct_k25_1000.db",
+    "dct_k1": "/home/CS_data/students/dgezgin/evoAtariBench/data/run_data/overfit_test/overfit_test.db",
 }
 
 # Output directory:

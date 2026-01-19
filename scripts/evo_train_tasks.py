@@ -15,6 +15,7 @@ from datetime import datetime
 
 os.environ["RAY_DEDUP_LOGS"] = "0"  # Disable the automatic deduplication of logs
 import ray
+from rich.progress import BarColumn, Progress, TextColumn, TimeElapsedColumn
 
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # Add the repository root to the Python path
 if _REPO_ROOT not in sys.path:
@@ -364,25 +365,41 @@ def main():
             ray_tasks.append(run_task_remote.options(max_retries=3, retry_exceptions=True, num_cpus=cores).remote(args_dict, run_id=i))
 
         remaining = set(ray_tasks)  # Set of the remaining tasks to be completed
-        while remaining:  # While there are remaining tasks to be completed
-            done, remaining = ray.wait(list(remaining), num_returns=1, timeout=None)
-            finished_ref = done[0]
-            try:
-                result = ray.get(finished_ref)
-            except Exception as e:
-                logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
-                continue
-            process_results(logger=logger, conn=conn, cursor=cursor, result=result)
+        with Progress(
+            TextColumn("{task.description}"),
+            BarColumn(style="grey50", complete_style="cyan", finished_style="bright_green"),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+        ) as progress:
+            progress_task = progress.add_task("Jobs completed", total=len(ray_tasks))
+            while remaining:  # While there are remaining tasks to be completed
+                done, remaining = ray.wait(list(remaining), num_returns=1, timeout=None)
+                finished_ref = done[0]
+                progress.advance(progress_task)
+                try:
+                    result = ray.get(finished_ref)
+                except Exception as e:
+                    logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
+                    continue
+                process_results(logger=logger, conn=conn, cursor=cursor, result=result)
         ray.shutdown()
     else:
-        for i, args_dict in enumerate(tasks, start=1):
-            logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
-            try:
-                result = run_task_local(args_dict, run_id=i)
-            except Exception as e:
-                logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
-                continue
-            process_results(logger=logger, conn=conn, cursor=cursor, result=result)
+        with Progress(
+            TextColumn("{task.description}"),
+            BarColumn(style="grey50", complete_style="cyan", finished_style="bright_green"),
+            TextColumn("{task.completed}/{task.total}"),
+            TimeElapsedColumn(),
+        ) as progress:
+            progress_task = progress.add_task("Jobs completed", total=len(tasks))
+            for i, args_dict in enumerate(tasks, start=1):
+                logger.info(f"[Task Start] [run_id={i}] [Task: {_task_params_one_line(args_dict)}]")
+                try:
+                    result = run_task_local(args_dict, run_id=i)
+                    process_results(logger=logger, conn=conn, cursor=cursor, result=result)
+                except Exception as e:
+                    logger.info(f"[Task Error] [Error: {type(e).__name__}] {e}")
+                finally:
+                    progress.advance(progress_task)
 
     # Close the connections to the database
     close_db(conn=conn, cursor=cursor, no_save=bool(args.no_save))

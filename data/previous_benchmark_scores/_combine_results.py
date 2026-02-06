@@ -8,8 +8,9 @@ Rules:
 - Each input CSV should have at least a `game` column. If `environment` is
   missing, we attempt to derive it using official_atari_game_info.csv.
 - Output is merged on `environment` (union of all environments).
-- The output always contains `game` and `environment` columns, plus all metric
-  columns from the inputs.
+- The output always contains `game`, `environment`, and `action_space_size`
+  columns (when known from official_atari_game_info.csv), plus all metric columns
+  from the inputs.
 - Deduplication:
   - Exact duplicates: if two metric columns have the exact same (env -> value)
     mapping over the games they cover, we keep one and skip the other.
@@ -68,6 +69,29 @@ def _load_official_env_map(path: Path) -> dict[str, str]:
             game = _extract_game_from_env(env)
             env_map.setdefault(_normalize_game_key(game), env)
     return env_map
+
+
+def _load_official_action_space_size_by_env(path: Path) -> dict[str, str]:
+    """
+    Load `environment` -> `action_space_size` mapping from official_atari_game_info.csv.
+    Values are returned as strings (as they should appear in CSV output).
+    """
+    action_by_env: dict[str, str] = {}
+    with path.open("r", encoding="utf-8", newline="") as f:
+        r = csv.DictReader(f)
+        if not r.fieldnames or "environment" not in r.fieldnames:
+            raise SystemExit(f"Error: {path} must have an 'environment' column")
+        if "action_space_size" not in r.fieldnames:
+            raise SystemExit(f"Error: {path} must have an 'action_space_size' column")
+        for row in r:
+            env = (row.get("environment") or "").strip()
+            if not env:
+                continue
+            size = (row.get("action_space_size") or "").strip()
+            if not size:
+                continue
+            action_by_env[env] = size
+    return action_by_env
 
 
 def _clean_value(v: str | None) -> str | None:
@@ -162,6 +186,9 @@ def write_table3_subset(folder: Path, subset_out: Path, strict_env: bool) -> Non
 
     official_csv = folder / "official_atari_game_info.csv"
     env_map = _load_official_env_map(official_csv) if official_csv.exists() else {}
+    action_by_env = (
+        _load_official_action_space_size_by_env(official_csv) if official_csv.exists() else {}
+    )
 
     # (output_col, source_file, source_col)
     wanted = [
@@ -224,14 +251,21 @@ def write_table3_subset(folder: Path, subset_out: Path, strict_env: bool) -> Non
         all_envs.update(m.keys())
 
     subset_out.parent.mkdir(parents=True, exist_ok=True)
-    out_fields = ["game", "environment"] + [c[0] for c in wanted]
+    out_fields = ["game", "environment", "action_space_size"] + [c[0] for c in wanted]
     with subset_out.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=out_fields)
         w.writeheader()
         for env in sorted(all_envs):
+            # Prefer direct env match, but fall back to official env for this game name.
+            action_size = action_by_env.get(env, "")
+            if not action_size and env_map:
+                official_env = env_map.get(_normalize_game_key(_extract_game_from_env(env)), "")
+                if official_env:
+                    action_size = action_by_env.get(official_env, "")
             row_out: dict[str, str] = {
                 "environment": env,
                 "game": game_by_env.get(env, _extract_game_from_env(env)),
+                "action_space_size": action_size,
             }
             for out_col, _fname, _src_col in wanted:
                 row_out[out_col] = col_maps.get(out_col, {}).get(env, "")
@@ -318,10 +352,19 @@ def combine(folder: Path, out_path: Path, strict_env: bool) -> None:
 
     official_csv = folder / "official_atari_game_info.csv"
     env_map = _load_official_env_map(official_csv) if official_csv.exists() else {}
+    action_by_env = (
+        _load_official_action_space_size_by_env(official_csv) if official_csv.exists() else {}
+    )
     if not env_map:
         print(
             f"Warning: official env map not found/empty at {official_csv}; "
             "will not be able to infer missing `environment` columns.",
+            file=sys.stderr,
+        )
+    if env_map and not action_by_env:
+        print(
+            f"Warning: could not load action_space_size from {official_csv}; "
+            "combined output will leave action_space_size blank.",
             file=sys.stderr,
         )
 
@@ -444,14 +487,24 @@ def combine(folder: Path, out_path: Path, strict_env: bool) -> None:
                     sig_to_outname[sig] = out_name
 
     # Build output rows
-    out_fields = ["game", "environment"] + final_metric_cols
+    out_fields = ["game", "environment", "action_space_size"] + final_metric_cols
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("w", encoding="utf-8", newline="") as f:
         w = csv.DictWriter(f, fieldnames=out_fields)
         w.writeheader()
         all_envs = sorted(game_by_env.keys())
         for env in all_envs:
-            row_out = {"environment": env, "game": game_by_env.get(env, _extract_game_from_env(env))}
+            # Prefer direct env match, but fall back to official env for this game name.
+            action_size = action_by_env.get(env, "")
+            if not action_size and env_map:
+                official_env = env_map.get(_normalize_game_key(_extract_game_from_env(env)), "")
+                if official_env:
+                    action_size = action_by_env.get(official_env, "")
+            row_out = {
+                "environment": env,
+                "game": game_by_env.get(env, _extract_game_from_env(env)),
+                "action_space_size": action_size,
+            }
             for col in final_metric_cols:
                 v = outname_to_values.get(col, {}).get(env)
                 if v is not None:

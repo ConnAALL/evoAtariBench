@@ -35,11 +35,9 @@ RAY_HEAD = f"{RAY_HEAD_IP}:{RAY_HEAD_PORT}"
 # List of Atari games to sweep through.
 ENV_SWEEP = [
     {"ENV_NAME": [
-        "ALE/Asterix-v5",
-        "ALE/BeamRider-v5",
-        "ALE/Freeway-v5",
-        "ALE/Seaquest-v5",
-        "ALE/SpaceInvaders-v5",
+        "ALE/BankHeist-v5",
+        "ALE/BattleZone-v5",
+        "ALE/Centipede-v5",
     ]},
 ]
 
@@ -50,7 +48,6 @@ RANDOMNESS_OVERRIDE_GROUPS = []
 COMPRESSION_SWEEP = [
     {"compression": "none"},
     {"compression": "dct", "k": [25], "norm": ["ortho"]},
-    {"compression": "dct", "k": [125], "norm": ["ortho"]},
 ]
 
 # List of the different non-linearity methods to sweep through.
